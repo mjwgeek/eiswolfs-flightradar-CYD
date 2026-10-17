@@ -166,6 +166,12 @@ namespace {
             return;
         }
 
+#ifdef HOSYOND_CYD40
+        // Never keep a TLS socket open after parsing a METAR: the next
+        // request goes to a DIFFERENT host and must release mbedTLS.
+        http.setReuse(false);
+#endif
+
         // Manche Server (aviationweather.gov eingeschlossen) lehnen
         // Anfragen ohne User-Agent-Header eher ab bzw. liefern damit
         // zuverlaessiger - der ESP32-HTTPClient sendet standardmaessig
@@ -231,6 +237,9 @@ namespace {
 
         http.setTimeout(HEXDB_AIRPORT_TIMEOUT_MS);
         if (!http.begin(client, url)) return;
+#ifdef HOSYOND_CYD40
+        http.setReuse(false);
+#endif
         int code = http.GET();
         if (code != HTTP_CODE_OK) {
             http.end();
@@ -371,6 +380,11 @@ namespace {
 
         http.setTimeout(Config::HTTP_TIMEOUT_MS);
         if (!http.begin(client, url)) return;
+#ifdef HOSYOND_CYD40
+        // An Open-Meteo connection must not survive into another
+        // aviationweather.gov/hexdb.io hostname on the same client.
+        http.setReuse(false);
+#endif
 
         int code = http.GET();
         if (code != HTTP_CODE_OK) {
@@ -552,9 +566,19 @@ void update() {
                             fabs(lat - lastLat) > 0.01 || fabs(lon - lastLon) > 0.01;
 
     uint32_t now = millis();
-    if (!locationChanged && (now - lastFetchMs < Config::WEATHER_FETCH_INTERVAL_MS)) {
+#ifdef HOSYOND_CYD40
+    // A changed location must NOT bypass the explicit 15-minute cap on
+    // automatic network attempts. Rate-limit from the *start* of each
+    // attempt, not just successful replies, so repeated failures cannot
+    // flood TLS/server connections.
+    if (hasLastLocation && now - lastFetchMs < Config::WEATHER_FETCH_INTERVAL_MS)
         return;
-    }
+    Serial.printf("[WEATHER-SCHEDULE] 15-minute window elapsed; locationChanged=%d uptimeMs=%lu\n",
+                  (int)locationChanged,(unsigned long)now);
+#else
+    if (!locationChanged && (now - lastFetchMs < Config::WEATHER_FETCH_INTERVAL_MS))
+        return;
+#endif
 
     lastFetchMs = now;
     lastLat = lat;

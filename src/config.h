@@ -154,7 +154,14 @@ namespace Config {
     // belastet werden. Vorher 10 Minuten - auf Alex' Wunsch auf 5 Minuten
     // verkuerzt, damit z.B. Regenbeginn (Regen-Overlay auf Radar/
     // Ruhebildschirm) nicht bis zu 10 Minuten zu spaet erkannt wird.
-    constexpr uint32_t WEATHER_FETCH_INTERVAL_MS = 300000; // 5 Minuten
+#ifdef HOSYOND_CYD40
+    // The 4-inch ESP32 can have only ~67KB heap free during TLS.
+    // Every automatic weather attempt, including after changing location,
+    // must be separated by at least 15 minutes.
+    constexpr uint32_t WEATHER_FETCH_INTERVAL_MS = 15UL * 60UL * 1000UL;
+#else
+    constexpr uint32_t WEATHER_FETCH_INTERVAL_MS = 300000; // original 5 minutes
+#endif
 
     // Intervall fuer die automatische Hintergrund-Pruefung auf neue
     // Firmware-Updates (siehe OtaUpdate::pollBackground(), aufgerufen aus

@@ -149,3 +149,22 @@ successful ADS-B reception and if available heap is >=65KB with >=36KB
 contiguous; optional METAR/hexdb HTTPS fetches are skipped if heap is below
 90KB or maxAlloc below 42KB. A weather retry happens at most on its normal
 5-minute interval. System behavior still requires real-board verification.
+
+## 15-minute weather cap and connection pacing
+
+For `HOSYOND_CYD40` only, the minimum time between **automatic weather
+request attempts** is 900,000ms (15 minutes). Changes in location/presets
+do not trigger extra automatic fetches inside this window; the last location
+remains displayed until the next interval. A failed attempt also consumes
+the window, so a failing TLS endpoint cannot create a retry storm. Other
+board builds keep the original 5-minute interval/location-change behavior.
+
+On the Hosyond, ADS-B retry/backoff timing now starts at HTTP completion
+instead of HTTP start. For example, after a 15-second failed read, the
+existing 18-second retry delay starts only when that attempt has finished,
+avoiding near-immediate TLS reinitialization. On successful reads the
+original 10-second cadence becomes a full 10 seconds after completion.
+Optional model/route enrichment requests are deferred while the aircraft
+feed is unhealthy and resume automatically once it recovers; the rest of
+the original auxiliary-data behavior is preserved. Serial markers
+`[ADSB-PACE]` and `[WEATHER-SCHEDULE]` report the decisions.

@@ -274,6 +274,14 @@ namespace {
                     // das nur bei Erfolg laeuft). fetchDurationMs zusaetzlich
                     // fuer den System-Status-Screen (system_status_screen.cpp).
                     AircraftTable::recordFetchOutcome(result.ok, result.httpCode, fetchDurationMs);
+#ifdef HOSYOND_CYD40
+                    // Interval/backoff starts when the previous HTTP request
+                    // COMPLETES. A 15s TLS timeout must not result in an
+                    // almost-immediate retry (which was fragmenting heap).
+                    lastFetchMs = millis();
+                    Serial.printf("[ADSB-PACE] last request finished; next interval=%lums result=%d\n",
+                                  (unsigned long)currentIntervalMs, result.httpCode);
+#endif
 
                     // Kurzer Yield-Punkt (Alex' Meldung: Verbindungsverlust/
                     // Watchdog-Absturz bei 100km + geoeffneter Web-Livekarte) -
@@ -622,14 +630,28 @@ namespace {
                 WebExportServer::update();
             }
 
+#ifdef HOSYOND_CYD40
+            // Optional model/route HTTPS lookups are deferred during an
+            // ADS-B outage. Protect the primary radar data feed first.
+            const auto detailFeed = AircraftTable::lastFetchOutcome();
+            const bool detailFeedHealthy =
+                detailFeed.hasResult && detailFeed.ok &&
+                AircraftTable::msSinceLastSuccessfulFetch(millis()) < 25000;
+            if (detailFeedHealthy) AircraftDetails::update();
+#else
             AircraftDetails::update();
+#endif
             // Route-Watchlist (SettingsStore::routeWatchlistAlertEnabled(),
             // AUS per Default, siehe route_watchlist.h) - kuemmert sich
             // intern selbst darum, hoechstens EINE Route pro Aufruf zu
             // ermitteln, nur fuer aktuell sichtbare Flugzeuge ohne bereits
             // abgeschlossenen Lookup, gleiches "jede Schleife mit
             // aufrufen"-Muster wie AircraftDetails::update() oben.
+#ifdef HOSYOND_CYD40
+            if (detailFeedHealthy) RouteWatchlist::pollBackground();
+#else
             RouteWatchlist::pollBackground();
+#endif
             PreviouslySeen::update();
 #ifdef HOSYOND_CYD40
             // Give aircraft HTTPS requests priority, and don't let the
