@@ -7,6 +7,9 @@ on:
     branches: [hosyond-cyd40]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   firmware:
     runs-on: ubuntu-latest
@@ -17,7 +20,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install PlatformIO
-        run: python -m pip install platformio
+        run: python -m pip install platformio 'esptool>=4,<5'
       - name: Build 4.0-inch firmware
         run: pio run -e hosyond-cyd40
       - name: Check flash images
@@ -25,12 +28,44 @@ jobs:
           test -s .pio/build/hosyond-cyd40/firmware.bin
           test -s .pio/build/hosyond-cyd40/bootloader.bin
           test -s .pio/build/hosyond-cyd40/partitions.bin
+      - name: Assemble full flash and Launcher images
+        run: |
+          set -eu
+          mkdir -p release
+          cp .pio/build/hosyond-cyd40/firmware.bin release/Flightradar-Hosyond-4.0-Launcher.bin
+          python -m esptool --chip esp32 merge_bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            -o release/Flightradar-Hosyond-4.0-Full.bin \
+            0x1000 .pio/build/hosyond-cyd40/bootloader.bin \
+            0x8000 .pio/build/hosyond-cyd40/partitions.bin \
+            0x10000 .pio/build/hosyond-cyd40/firmware.bin
+          test -s release/Flightradar-Hosyond-4.0-Launcher.bin
+          test -s release/Flightradar-Hosyond-4.0-Full.bin
       - name: Upload board-specific images
         uses: actions/upload-artifact@v4
         with:
           name: flightradar-hosyond-cyd40
           path: |
-            .pio/build/hosyond-cyd40/bootloader.bin
-            .pio/build/hosyond-cyd40/partitions.bin
-            .pio/build/hosyond-cyd40/firmware.bin
+            release/Flightradar-Hosyond-4.0-Launcher.bin
+            release/Flightradar-Hosyond-4.0-Full.bin
           if-no-files-found: error
+      - name: Publish Hosyond firmware to Releases
+        if: github.ref == 'refs/heads/hosyond-cyd40' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          TAG="hosyond-cyd40-preview"
+          APP="release/Flightradar-Hosyond-4.0-Launcher.bin"
+          FULL="release/Flightradar-Hosyond-4.0-Full.bin"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APP" "$FULL" --clobber
+            # This tag is explicitly a rolling, mutable PREVIEW tag.
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" -f sha="$GITHUB_SHA" -F force=true
+          else
+            gh release create "$TAG" "$APP" "$FULL" \
+              --target "$GITHUB_SHA" \
+              --title "Flightradar · Hosyond 4.0 preview" \
+              --notes "Compiled Hosyond 4.0 ST7796S firmware (hardware testing pending). Launcher.bin is an app-only image requiring a compatible existing app partition of at least the compiled image size; Full.bin is a merged image to flash at offset 0x0. This is the board-specific build, NOT the 2.8-inch ILI9341 firmware. The preview tag and its two assets are updated after successful builds." \
+              --prerelease
+          fi

@@ -27,3 +27,24 @@ Check partition compatibility and preserve NVS if reusing saved settings.
 
 **Status:** initial port; verify compilation, physical display, touch calibration,
 SD card, audio, menus and radar layout on real hardware before calling it tested.
+
+
+## GitHub Releases
+
+**Download the current Hosyond 4.0 preview:**
+https://github.com/mjwgeek/eiswolfs-flightradar-CYD/releases
+
+Only two `.bin` files appear in Releases:
+
+- `Flightradar-Hosyond-4.0-Launcher.bin`: application image, for SD-card
+  launchers with a compatible existing app partition and enough space.
+- `Flightradar-Hosyond-4.0-Full.bin`: complete merged ESP32 image,
+  flashed at offset `0x0` by a compatible serial flash tool.
+
+The three components `bootloader.bin`, `partitions.bin` and `firmware.bin`
+are still compiled internally, but aren't public Release assets.
+
+**Warning:** The merged image changes flash layout and can erase saved
+settings. The Launcher image is not the correct input for a complete
+blank-flash installation. This is a hardware-untested preview, not an
+established tested release.
