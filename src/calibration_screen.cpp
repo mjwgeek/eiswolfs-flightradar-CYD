@@ -88,15 +88,36 @@ void run(TFT_eSPI& tft) {
         samples[i] = waitForTap(tft);
     }
 
+#ifdef HOSYOND_CYD40
+    // The touch X/Y axes on the Hosyond are not guaranteed to be aligned
+    // with the display's native 320x480 portrait axes. Fit all FOUR raw
+    // corners as an affine basis (including swap/reverse) and validate.
+    TouchInput::Point corners[4];
+    bool enough=true;
+    for(int i=0;i<4;i++) {
+        if(samples[i].n<3) enough=false;
+        corners[i].x=samples[i].avgX();
+        corners[i].y=samples[i].avgY();
+    }
+    if(!enough || !TouchInput::setCalibrationFromCorners(corners)) {
+        tft.fillScreen(TFT_BLACK);
+        tft.setTextColor(TFT_RED,TFT_BLACK);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString("Calibration invalid",W/2,H/2-16);
+        tft.drawString("Try again, touch each target",W/2,H/2+12);
+        delay(2200);
+        // Do not poison SD with invalid points.
+        return;
+    }
+#else
     int16_t xmin = (samples[0].avgX() + samples[3].avgX()) / 2;
     int16_t xmax = (samples[1].avgX() + samples[2].avgX()) / 2;
     int16_t ymin = (samples[0].avgY() + samples[1].avgY()) / 2;
     int16_t ymax = (samples[3].avgY() + samples[2].avgY()) / 2;
-
     swapIfNeeded(xmin, xmax);
     swapIfNeeded(ymin, ymax);
-
     TouchInput::setCalibration(xmin, xmax, ymin, ymax);
+#endif
     TouchInput::saveCalibration();
 
     tft.fillScreen(TFT_BLACK);

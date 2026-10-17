@@ -27,6 +27,11 @@ namespace TouchInput {
     void setCalibration(int16_t rawXmin, int16_t rawXmax, int16_t rawYmin, int16_t rawYmax);
     void saveCalibration();
     bool hasCalibration();
+#ifdef HOSYOND_CYD40
+    // Four corners in displayed order TL,TR,BR,BL; fits a rotated/skewed
+    // resistive digitizer instead of presuming raw axes are screen axes.
+    bool setCalibrationFromCorners(const Point corners[4]);
+#endif
 
     // Aktueller Touch-Zustand, roh (unkalibriert), z.B. fuer die
     // Kalibrierungs-Routine selbst.

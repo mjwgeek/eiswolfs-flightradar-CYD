@@ -62,3 +62,18 @@ The CYD40 inversion baseline is reversed relative to the original 2.8-inch
 panel, at the *runtime* invertDisplay() calls (not just the TFT setup macro).
 This also fixes SD cards storing the previous invert=1 value. The original
 2.8-inch firmware keeps its previous behavior.
+
+## Flightradar touch calibration v2 (Hosyond only)
+
+The touch calibration screen is portrait **320x480**, not the separate
+Porkchop landscape on-screen keyboard (480x320). A severe tap offset came
+from `TouchInput::wasTapped()` returning *raw XPT2046 counts* instead of
+mapped screen coordinates. It now returns the calibrated last-down point.
+
+The old 4-integer calibration assumed XPT2046 raw X/Y aligned with the LCD,
+which is not guaranteed with a shared-bus mounted digitizer. For Hosyond,
+four corner samples now produce an affine fit including rotated or reversed
+axes, reject degenerate measurements and are stored as `H40V2`.
+The old `calibration_cyd40.txt` is deliberately rejected once so the
+proper calibration is requested on the next boot after flashing.
+The 2.8-inch CYD keeps its previous calibration file and format.

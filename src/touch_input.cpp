@@ -28,9 +28,55 @@ namespace {
     int16_t calYmin = 200;
     int16_t calYmax = 3900;
     bool calibrationLoaded = false;
+#ifdef HOSYOND_CYD40
+    // A 2x2 affine coordinate basis (4 real corner samples) handles
+    // swapped raw axes, negative slopes and digitizers mounted rotated.
+    // Values live in the exact 320x480 coordinates drawn by calibration.
+    struct Affine {
+        float midX=0, midY=0;
+        float rightX=0, rightY=0;
+        float downX=0, downY=0;
+        float determinant=0;
+        bool baselineRotated180=false;
+        bool valid=false;
+        Point corners[4]; // persisted so the fit can be restored losslessly
+    };
+    Affine affine;
+    bool fitCorners(const Point corner[4], bool baselineRotated180) {
+        // Index: top-left, top-right, bottom-right, bottom-left.
+        int32_t mx=0,my=0;
+        for(int i=0;i<4;i++){mx+=corner[i].x;my+=corner[i].y;}
+        const float centerX=mx*0.25f, centerY=my*0.25f;
+        const float rightX=((corner[1].x-corner[0].x)+(corner[2].x-corner[3].x))*0.5f;
+        const float rightY=((corner[1].y-corner[0].y)+(corner[2].y-corner[3].y))*0.5f;
+        const float downX=((corner[3].x-corner[0].x)+(corner[2].x-corner[1].x))*0.5f;
+        const float downY=((corner[3].y-corner[0].y)+(corner[2].y-corner[1].y))*0.5f;
+        const float determinant=rightX*downY-rightY*downX;
+        // Both directions should traverse a meaningful portion of the
+        // XPT2046 12-bit range and should not be almost parallel.
+        const float normR=rightX*rightX+rightY*rightY;
+        const float normD=downX*downX+downY*downY;
+        if(normR<40000 || normD<40000 ||
+           determinant*determinant<0.01f*normR*normD) return false;
+        // Reject accidentally doubled taps / wildly mismatched corners.
+        const Point& tl=corner[0], &tr=corner[1], &br=corner[2], &bl=corner[3];
+        const float closureX=tl.x+br.x-tr.x-bl.x;
+        const float closureY=tl.y+br.y-tr.y-bl.y;
+        if(closureX*closureX+closureY*closureY > 0.10f*(normR+normD)) return false;
+        affine.midX=centerX; affine.midY=centerY;
+        affine.rightX=rightX; affine.rightY=rightY;
+        affine.downX=downX; affine.downY=downY;
+        affine.determinant=determinant;
+        affine.baselineRotated180=baselineRotated180;
+        for(int i=0;i<4;i++) affine.corners[i]=corner[i];
+        affine.valid=true;
+        calibrationLoaded=true;
+        return true;
+    }
+#endif
 
     bool lastTouched = false;
-    Point lastRaw;
+    Point lastMapped;  // release events must report calibrated, not raw ADC coordinates
 
     // TEST DIAG - siehe touch_input.h::lastRawSample(). Rein additiv,
     // wird nur in rawPoint() unten passiv mitgeschrieben, beeinflusst
@@ -83,6 +129,12 @@ void setCalibration(int16_t rawXmin, int16_t rawXmax, int16_t rawYmin, int16_t r
     calibrationLoaded = true;
 }
 
+#ifdef HOSYOND_CYD40
+bool setCalibrationFromCorners(const Point corners[4]) {
+    return fitCorners(corners, rotated180);
+}
+#endif
+
 bool loadCalibration() {
     if (!SD.exists(Config::SD_CALIBRATION_FILE)) return false;
 
@@ -93,6 +145,22 @@ bool loadCalibration() {
     f.close();
     line.trim();
 
+#ifdef HOSYOND_CYD40
+    // Prior preview stored sorted min/max in the *wrong axis order*.
+    // Never silently reuse it: prompt for one proper four-corner calibration.
+    int rotation=0, x0,y0,x1,y1,x2,y2,x3,y3;
+    if(sscanf(line.c_str(),"H40V2,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+              &rotation,&x0,&y0,&x1,&y1,&x2,&y2,&x3,&y3)!=9)
+        return false;
+    if(rotation<0||rotation>1)return false;
+    Point corners[4];
+    const int xx[]={x0,x1,x2,x3}, yy[]={y0,y1,y2,y3};
+    for(int i=0;i<4;i++) {
+        if(xx[i]<0||xx[i]>4095||yy[i]<0||yy[i]>4095)return false;
+        corners[i].x=xx[i]; corners[i].y=yy[i];
+    }
+    return fitCorners(corners,rotation!=0);
+#else
     int p1 = line.indexOf(',');
     int p2 = line.indexOf(',', p1 + 1);
     int p3 = line.indexOf(',', p2 + 1);
@@ -107,12 +175,21 @@ bool loadCalibration() {
 
     setCalibration(xmin, xmax, ymin, ymax);
     return true;
+#endif
 }
 
 void saveCalibration() {
     File f = SD.open(Config::SD_CALIBRATION_FILE, FILE_WRITE);
     if (!f) return;
+#ifdef HOSYOND_CYD40
+    if(!affine.valid) { f.close(); return; }
+    f.printf("H40V2,%d",affine.baselineRotated180?1:0);
+    for(int i=0;i<4;i++)
+        f.printf(",%d,%d",affine.corners[i].x,affine.corners[i].y);
+    f.print("\n");
+#else
     f.printf("%d,%d,%d,%d\n", calXmin, calXmax, calYmin, calYmax);
+#endif
     f.close();
 }
 
@@ -156,6 +233,28 @@ Point mappedPoint() {
     out.touched = raw.touched;
     if (!raw.touched) return out;
 
+#ifdef HOSYOND_CYD40
+    if(affine.valid) {
+        const float dx=raw.x-affine.midX,dy=raw.y-affine.midY;
+        // Invert the raw basis. This correctly handles swapped and
+        // reversed axes, unlike separate sorted raw min/max values.
+        const float u=(dx*affine.downY-dy*affine.downX)/affine.determinant;
+        const float v=(affine.rightX*dy-affine.rightY*dx)/affine.determinant;
+        float px=Config::SCREEN_WIDTH*0.5f+
+                 u*(Config::SCREEN_WIDTH-2*MARGIN_PX);
+        float py=Config::SCREEN_HEIGHT*0.5f+
+                 v*(Config::SCREEN_HEIGHT-2*MARGIN_PX);
+        // The calibration targets were displayed in whatever orientation
+        // was active at calibration time. Reflect only if later changed.
+        if(rotated180!=affine.baselineRotated180) {
+            px=(Config::SCREEN_WIDTH-1)-px;
+            py=(Config::SCREEN_HEIGHT-1)-py;
+        }
+        out.x=clampi((int16_t)lroundf(px),0,Config::SCREEN_WIDTH-1);
+        out.y=clampi((int16_t)lroundf(py),0,Config::SCREEN_HEIGHT-1);
+        return out;
+    }
+#endif
     long mx = map((long)raw.x, calXmin, calXmax, MARGIN_PX, Config::SCREEN_WIDTH - MARGIN_PX);
     long my = map((long)raw.y, calYmin, calYmax, MARGIN_PX, Config::SCREEN_HEIGHT - MARGIN_PX);
 
@@ -178,13 +277,14 @@ bool wasTapped(Point& outPoint) {
 
     bool fired = false;
     if (!cur.touched && lastTouched) {
-        // Loslassen erkannt -> Tap an der zuletzt bekannten Position melden.
-        outPoint = lastRaw;
+        // Critical regression fix: the previous version returned the raw
+        // sample even though mappedPoint() had calibrated the press.
+        outPoint = lastMapped;
         fired = true;
     }
 
     lastTouched = cur.touched;
-    if (cur.touched) lastRaw = cur;
+    if (cur.touched) lastMapped = cur;
 
     if (fired) lastTapMs = millis();
 
