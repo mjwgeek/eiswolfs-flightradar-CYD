@@ -106,7 +106,7 @@ void run(TFT_eSPI& tft) {
 
         uint32_t ageMs = AircraftTable::msSinceLastSuccessfulFetch(millis());
         AircraftTable::FetchOutcome outcome = AircraftTable::lastFetchOutcome();
-        Quality quality = qualityForAge(ageMs);
+        Quality quality = outcome.hasResult ? qualityForAge(ageMs) : Quality::Fair;
 
         tft.fillScreen(TFT_BLACK);
         tft.setTextColor(UiTheme::accentColor(tft), TFT_BLACK);
@@ -147,7 +147,13 @@ void run(TFT_eSPI& tft) {
         // als verstaendlicheres "Zeitueberschreitung" dargestellt.
         String resultText;
         if (!outcome.hasResult) {
+#ifdef HOSYOND_CYD40
+            if (outcome.inProgress) resultText = "Fetching aircraft data...";
+            else if (WiFi.status() != WL_CONNECTED) resultText = "Waiting for Wi-Fi";
+            else resultText = "Waiting for first fetch";
+#else
             resultText = I18n::t(StringId::CONNECTION_STATUS_RESULT_NONE);
+#endif
         } else if (outcome.ok) {
             resultText = I18n::t(StringId::CONNECTION_STATUS_RESULT_SUCCESS);
         } else if (outcome.httpCode == -11) {
@@ -171,7 +177,12 @@ void run(TFT_eSPI& tft) {
         tft.fillCircle((int16_t)(LINE_X + 6), (int16_t)(y - 4), 6, qColor);
         tft.setTextColor(qColor, TFT_BLACK);
         tft.setCursor((int16_t)(LINE_X + 20), y);
-        tft.println(String(I18n::t(StringId::CONNECTION_STATUS_QUALITY_PREFIX)) + labelForQuality(quality));
+        tft.println(String(I18n::t(StringId::CONNECTION_STATUS_QUALITY_PREFIX)) +
+#ifdef HOSYOND_CYD40
+                    (outcome.hasResult ? labelForQuality(quality) : "Waiting"));
+#else
+                    labelForQuality(quality));
+#endif
         y += LINE_H;
 
         Rect backBtn = {LINE_X, (int16_t)(Config::SCREEN_HEIGHT - 50), (int16_t)(Config::SCREEN_WIDTH - 20), 40};

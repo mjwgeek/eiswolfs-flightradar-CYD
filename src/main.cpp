@@ -2188,7 +2188,21 @@ void loop() {
     }
 
     if (tapped) {
+#ifdef HOSYOND_CYD40
+        // The old 22-pixel-high header targets were designed for a
+        // smaller CYD. On a physical 4-inch resistive panel, favor a
+        // 34-pixel touch height while keeping exact horizontal bounds so
+        // adjacent Mode, weather, and Menu targets never overlap.
+        auto headerHit = [&](const Rect& r) {
+            return tap.x >= r.x && tap.x < r.x + r.w &&
+                   tap.y >= 0 && tap.y < HEADER_ROW_Y + 34;
+        };
+        Serial.printf("[TOUCH-H40] x=%d y=%d Menu=%d Mode=%d\n",
+                      tap.x,tap.y,(int)headerHit(menuBtn),(int)headerHit(modesBtn));
+        if (headerHit(menuBtn)) {
+#else
         if (menuBtn.contains(tap.x, tap.y)) {
+#endif
             // Bei verfuegbarem Update direkt in die System-Seite springen
             // (startAtSystem=true) statt ins Hauptmenue - dort stehen
             // Versionsnummer/"Nach Update suchen", vorher musste Alex nach
@@ -2252,7 +2266,11 @@ void loop() {
             drawHeader();
             updateStatusLine();
             forceRedraw = true;
+#ifdef HOSYOND_CYD40
+        } else if (headerHit(modesBtn)) {
+#else
         } else if (modesBtn.contains(tap.x, tap.y)) {
+#endif
             // Direktzugriff auf "Radar-Darstellung" (CRT-Phosphor/Radar-
             // Puls) von der Hauptansicht aus, siehe modesBtn.
             RadarThemeScreen::run(tft);

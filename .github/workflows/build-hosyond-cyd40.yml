@@ -21,6 +21,10 @@ jobs:
           python-version: "3.11"
       - name: Install PlatformIO
         run: python -m pip install platformio 'esptool>=4,<5'
+      - name: Stamp firmware commit for rolling OTA previews
+        run: |
+          mkdir -p include
+          printf '#pragma once\n#define HOSYOND_BUILD_SHA "%s"\n' "$GITHUB_SHA" > include/hosyond_build_id.h
       - name: Build 4.0-inch firmware
         run: pio run -e hosyond-cyd40
       - name: Check flash images

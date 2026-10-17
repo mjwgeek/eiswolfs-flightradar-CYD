@@ -133,59 +133,13 @@ namespace {
             WifiMgr::update();
             LocationManager::update();
 
-            if (!webServerStarted && WifiMgr::getState() == WifiMgr::State::Connected) {
-                WebExportServer::begin();
-                webServerStarted = true;
-            }
-            if (webServerStarted) {
-                WebExportServer::update();
-            }
-
-            AircraftDetails::update();
-            // Route-Watchlist (SettingsStore::routeWatchlistAlertEnabled(),
-            // AUS per Default, siehe route_watchlist.h) - kuemmert sich
-            // intern selbst darum, hoechstens EINE Route pro Aufruf zu
-            // ermitteln, nur fuer aktuell sichtbare Flugzeuge ohne bereits
-            // abgeschlossenen Lookup, gleiches "jede Schleife mit
-            // aufrufen"-Muster wie AircraftDetails::update() oben.
-            RouteWatchlist::pollBackground();
-            PreviouslySeen::update();
-            Weather::update();
-            // Kuemmert sich intern um ihr eigenes, deutlich selteneres
-            // Intervall (Config::OTA_BACKGROUND_CHECK_INTERVAL_MS, siehe
-            // ota_update.cpp) - hier einfach jede Schleife mit aufrufen,
-            // genau wie Weather::update() oben.
-            OtaUpdate::pollBackground();
-            // Optionale MQTT-Anbindung (SettingsStore::mqttEnabled(), AUS
-            // per Default, siehe mqtt_client.h) - kuemmert sich selbst um
-            // (Wieder-)Verbinden mit eigenem Mindestabstand zwischen
-            // Versuchen, hier einfach jede Schleife mit aufrufen, gleiches
-            // Muster wie Weather::update()/OtaUpdate::pollBackground() oben.
-            MqttClient::loop();
-            // Optionale ntfy.sh-Push-Benachrichtigung (SettingsStore::
-            // ntfyPushEnabled(), AUS per Default, siehe ntfy_push.h) - sendet
-            // nur, wenn radar_screen.cpp::updateProximityAlert() (Core 1)
-            // gerade eine Nachricht vorgemerkt hat, sonst kehrt update()
-            // sofort zurueck. Gleiches "jede Schleife mit aufrufen"-Muster
-            // wie MqttClient::loop() oben.
-            NtfyPush::update();
-            // Unabhaengig vom Erfolg der ADS-B-Abfrage weiter unten pruefen,
-            // damit die 24h-Sicherheitsabschaltung des Flugbuchs auch waehrend
-            // laengerer WLAN-/ADS-B-Ausfaelle zuverlaessig greift (siehe
-            // flight_logbook.cpp::enforceAutoOff() fuer den Hintergrund).
-            FlightLogbook::enforceAutoOff();
-
-            // Alterung veralteter Flugzeuge (siehe AircraftTable::
-            // ageOutStale()) laeuft bewusst hier, UNABHAENGIG vom Erfolg der
-            // ADS-B-Abfrage weiter unten - sonst wuerden bei anhaltendem
-            // Verbindungsverlust nie mehr entfernte Eintraege den
-            // Naeherungsalarm auf einem eingefrorenen Zustand haengen
-            // lassen (Alex' Meldung).
-            AircraftTable::ageOutStale(millis());
-
-            if (millis() - lastFetchMs >= currentIntervalMs) {
+            // First fetch becomes due as soon as Wi-Fi connects.
+            // It runs BEFORE Weather/MQTT/OTA and other optional clients.
+            if (WifiMgr::getState() == WifiMgr::State::Connected &&
+                (lastFetchMs == 0 || millis() - lastFetchMs >= currentIntervalMs)) {
                 lastFetchMs = millis();
-
+                Serial.printf("[ADSB-START] uptime=%lu interval=%lu\n",
+                              (unsigned long)millis(), (unsigned long)currentIntervalMs);
                 if (WifiMgr::getState() == WifiMgr::State::Connected) {
                     LocationManager::requestIpLookupIfNeeded();
 
@@ -308,6 +262,7 @@ namespace {
                     Serial.printf("[HEAP-DIAG] uptimeMs=%lu freeHeap=%u maxAlloc=%u\n",
                                   (unsigned long)millis(), (unsigned)ESP.getFreeHeap(),
                                   (unsigned)ESP.getMaxAllocHeap());
+                    AircraftTable::markFetchStarted();
                     uint32_t fetchStartMs = millis();
                     auto result = AdsbClient::fetch(lat, lon, rangeKm,
                                                      tempTable, Config::MAX_TRACKED_AIRCRAFT);
@@ -656,6 +611,84 @@ namespace {
                     }
                 }
             }
+
+
+
+            if (!webServerStarted && WifiMgr::getState() == WifiMgr::State::Connected) {
+                WebExportServer::begin();
+                webServerStarted = true;
+            }
+            if (webServerStarted) {
+                WebExportServer::update();
+            }
+
+            AircraftDetails::update();
+            // Route-Watchlist (SettingsStore::routeWatchlistAlertEnabled(),
+            // AUS per Default, siehe route_watchlist.h) - kuemmert sich
+            // intern selbst darum, hoechstens EINE Route pro Aufruf zu
+            // ermitteln, nur fuer aktuell sichtbare Flugzeuge ohne bereits
+            // abgeschlossenen Lookup, gleiches "jede Schleife mit
+            // aufrufen"-Muster wie AircraftDetails::update() oben.
+            RouteWatchlist::pollBackground();
+            PreviouslySeen::update();
+#ifdef HOSYOND_CYD40
+            // Give aircraft HTTPS requests priority, and don't let the
+            // 3-host weather pass exhaust an already fragmented ESP32 heap.
+            // 66.9KB total free was observed on the user's actual device.
+            // Skip (rather than loop-retry) until the aircraft feed is
+            // healthy and TLS has safe free/contiguous headroom.
+            const auto lastAdsb = AircraftTable::lastFetchOutcome();
+            const uint32_t weatherFreeHeap = ESP.getFreeHeap();
+            const uint32_t weatherLargest = ESP.getMaxAllocHeap();
+            const bool weatherCanRun =
+                lastAdsb.hasResult && lastAdsb.ok &&
+                AircraftTable::msSinceLastSuccessfulFetch(millis()) < 15000 &&
+                weatherFreeHeap >= 95000 && weatherLargest >= 38000;
+            if (weatherCanRun) {
+                Weather::update();
+            } else {
+                static uint32_t lastSkipLogMs = 0;
+                if (millis() - lastSkipLogMs >= 60000) {
+                    lastSkipLogMs = millis();
+                    Serial.printf("[WEATHER-SKIP] prioritize ADS-B; heap=%u maxAlloc=%u lastADSB=%d\n",
+                                  (unsigned)weatherFreeHeap,(unsigned)weatherLargest,
+                                  (int)(lastAdsb.hasResult && lastAdsb.ok));
+                }
+            }
+#else
+            Weather::update();
+#endif
+            // Kuemmert sich intern um ihr eigenes, deutlich selteneres
+            // Intervall (Config::OTA_BACKGROUND_CHECK_INTERVAL_MS, siehe
+            // ota_update.cpp) - hier einfach jede Schleife mit aufrufen,
+            // genau wie Weather::update() oben.
+            OtaUpdate::pollBackground();
+            // Optionale MQTT-Anbindung (SettingsStore::mqttEnabled(), AUS
+            // per Default, siehe mqtt_client.h) - kuemmert sich selbst um
+            // (Wieder-)Verbinden mit eigenem Mindestabstand zwischen
+            // Versuchen, hier einfach jede Schleife mit aufrufen, gleiches
+            // Muster wie Weather::update()/OtaUpdate::pollBackground() oben.
+            MqttClient::loop();
+            // Optionale ntfy.sh-Push-Benachrichtigung (SettingsStore::
+            // ntfyPushEnabled(), AUS per Default, siehe ntfy_push.h) - sendet
+            // nur, wenn radar_screen.cpp::updateProximityAlert() (Core 1)
+            // gerade eine Nachricht vorgemerkt hat, sonst kehrt update()
+            // sofort zurueck. Gleiches "jede Schleife mit aufrufen"-Muster
+            // wie MqttClient::loop() oben.
+            NtfyPush::update();
+            // Unabhaengig vom Erfolg der ADS-B-Abfrage weiter unten pruefen,
+            // damit die 24h-Sicherheitsabschaltung des Flugbuchs auch waehrend
+            // laengerer WLAN-/ADS-B-Ausfaelle zuverlaessig greift (siehe
+            // flight_logbook.cpp::enforceAutoOff() fuer den Hintergrund).
+            FlightLogbook::enforceAutoOff();
+
+            // Alterung veralteter Flugzeuge (siehe AircraftTable::
+            // ageOutStale()) laeuft bewusst hier, UNABHAENGIG vom Erfolg der
+            // ADS-B-Abfrage weiter unten - sonst wuerden bei anhaltendem
+            // Verbindungsverlust nie mehr entfernte Eintraege den
+            // Naeherungsalarm auf einem eingefrorenen Zustand haengen
+            // lassen (Alex' Meldung).
+            AircraftTable::ageOutStale(millis());
 
             // Erst hier, unmittelbar vor dem Schlafen, wirklich idle - siehe
             // ausfuehrlichen Kommentar am Schleifenanfang: deckt jetzt ALLE

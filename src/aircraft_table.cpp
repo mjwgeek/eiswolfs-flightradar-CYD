@@ -42,6 +42,7 @@ namespace {
     // lastSuccessfulFetchMs) - ein torn read (z.B. ok=true mit noch altem
     // httpCode) waere hier unkritisch, das ist reine Diagnose-Anzeige.
     std::atomic<bool> hasFetchOutcome{false};
+    std::atomic<bool> fetchInProgress{false};
     std::atomic<bool> lastFetchOk{false};
     std::atomic<int>  lastFetchHttpCode{0};
     std::atomic<uint32_t> lastFetchDurationMs{0};
@@ -69,16 +70,21 @@ uint32_t msSinceLastSuccessfulFetch(uint32_t nowMs) {
     return nowMs - lastSuccessfulFetchMs.load(std::memory_order_relaxed);
 }
 
+void markFetchStarted() {
+    fetchInProgress.store(true, std::memory_order_relaxed);
+}
 void recordFetchOutcome(bool ok, int httpCode, uint32_t durationMs) {
     lastFetchOk.store(ok, std::memory_order_relaxed);
     lastFetchHttpCode.store(httpCode, std::memory_order_relaxed);
     lastFetchDurationMs.store(durationMs, std::memory_order_relaxed);
     hasFetchOutcome.store(true, std::memory_order_relaxed);
+    fetchInProgress.store(false, std::memory_order_relaxed);
 }
 
 FetchOutcome lastFetchOutcome() {
     FetchOutcome out;
     out.hasResult = hasFetchOutcome.load(std::memory_order_relaxed);
+    out.inProgress = fetchInProgress.load(std::memory_order_relaxed);
     out.ok = lastFetchOk.load(std::memory_order_relaxed);
     out.httpCode = lastFetchHttpCode.load(std::memory_order_relaxed);
     out.durationMs = lastFetchDurationMs.load(std::memory_order_relaxed);

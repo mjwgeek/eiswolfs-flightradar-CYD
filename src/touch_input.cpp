@@ -76,6 +76,11 @@ namespace {
 #endif
 
     bool lastTouched = false;
+#ifdef HOSYOND_CYD40
+    // A pressed touch should be captured immediately, not only on release:
+    // rendering and heavy SPI work can miss a short release edge.
+    uint32_t lastDownEventMs = 0;
+#endif
     Point lastMapped;  // release events must report calibrated, not raw ADC coordinates
 
     // TEST DIAG - siehe touch_input.h::lastRawSample(). Rein additiv,
@@ -274,21 +279,33 @@ Point mappedPoint() {
 
 bool wasTapped(Point& outPoint) {
     Point cur = mappedPoint();
-
+#ifdef HOSYOND_CYD40
+    // The original 2.8-inch touch code waits until finger release.
+    // The 4-inch board can lose the release edge during radar rendering.
+    // Fire on the first clean press and latch until an actual release.
+    const uint32_t now = millis();
+    const bool downEdge = cur.touched && !lastTouched;
+    const bool fired = downEdge &&
+        (lastDownEventMs == 0 || now - lastDownEventMs >= 120);
+    lastTouched = cur.touched;
+    if (cur.touched) lastMapped = cur;
+    if (fired) {
+        outPoint = cur;
+        lastDownEventMs = now;
+        lastTapMs = now;
+    }
+    return fired;
+#else
     bool fired = false;
     if (!cur.touched && lastTouched) {
-        // Critical regression fix: the previous version returned the raw
-        // sample even though mappedPoint() had calibrated the press.
         outPoint = lastMapped;
         fired = true;
     }
-
     lastTouched = cur.touched;
     if (cur.touched) lastMapped = cur;
-
     if (fired) lastTapMs = millis();
-
     return fired;
+#endif
 }
 
 uint32_t msSinceLastTap() {

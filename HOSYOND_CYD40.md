@@ -98,3 +98,35 @@ Wi-Fi RSSI, free heap, and largest allocatable block so we can identify
 TLS fragmentation/resource failures. Existing bounded retry/backoff and
 JSON streaming parse remain unchanged. No hardware connectivity fix is
 claimed until the ESP32's actual error codes are observed.
+
+## Hosyond OTA from this fork
+
+The Hosyond build now checks the rolling preview **commit SHA** from the
+`mjwgeek/eiswolfs-flightradar-CYD` GitHub tag, instead of upstream 2.8-inch
+firmware. CI stamps its build commit into the application. Users manually
+confirm a download through System > Check for Updates; only the exact
+`Flightradar-Hosyond-4.0-Launcher.bin` asset URL is accepted. Pending OTA
+runs early after restart when memory is freshest. Wi-Fi OTA never
+intentionally overwrites SD calibration or files.
+
+An OTA-safe running app MUST be in an OTA_0 or OTA_1 partition and have
+another separate OTA slot of at least 1,900,000 bytes (the Hosyond full
+image uses min_spiffs two 1,966,080-byte slots). Other SD launchers may
+use incompatible partitions, in which case the updater fails closed.
+Install this OTA-capable image once through a normal flasher/SD launcher,
+then use the firmware's check-update menu for subsequent Wi-Fi upgrades.
+Some launchers may require a one-time Full.bin USB flash to establish OTA
+partitions; back up settings first and check bootloader/partition layout.
+Automatic GitHub checking is skipped if heap is too low, to protect ADS-B;
+manual OTA checks are still available. OTA has compiled but needs physical
+validation before it is considered field-proven.
+
+## ADS-B and touch recovery
+
+NetTask attempts aircraft fetch immediately on Wi-Fi connection, before
+weather or ancillary network clients; status now shows Fetching, Waiting
+for Wi-Fi, or Waiting for first fetch. Hosyond weather fetch is skipped
+under 95 KB free heap or 38 KB maximum allocatable block and until
+recent ADS-B success. Serial outputs [WEATHER-SKIP]. The 4.0 touch input
+registers a debounced press (rather than a release event) and expands
+the vertical hit targets of Menu and Mode. Serial outputs [TOUCH-H40].

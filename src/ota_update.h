@@ -2,6 +2,8 @@
 #include <Arduino.h>
 
 // Firmware-Update ueber WLAN (Menue > System > "Nach Update suchen") -
+// Hosyond checks its fork's rolling preview commit and downloads ONLY
+// the CYD40 application asset, with mandatory dual-OTA partition checks.
 // prueft gegen die neueste Version im GitHub-Repository (Releases-API) und
 // installiert sie bei Bestaetigung direkt auf dem Geraet, ohne Kabel/
 // Web-Flasher. Der manuelle Check+Install-Ablauf (checkForUpdate() +

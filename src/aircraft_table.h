@@ -45,7 +45,8 @@ namespace AircraftTable {
     // aufgerufen, egal ob erfolgreich oder nicht (net_task.cpp, direkt nach
     // AdsbClient::fetch()).
     struct FetchOutcome {
-        bool hasResult = false; // false = noch kein Abrufversuch seit dem Boot
+        bool hasResult = false; // false = no completed fetch yet
+        bool inProgress = false; // actively fetching (not "no attempt")
         bool ok = false;
         int  httpCode = 0;
         // Wie lange der letzte Abrufversuch gedauert hat (millis()-Differenz
@@ -55,6 +56,7 @@ namespace AircraftTable {
         // system_status_screen.cpp).
         uint32_t durationMs = 0;
     };
+    void markFetchStarted();
     void recordFetchOutcome(bool ok, int httpCode, uint32_t durationMs);
     FetchOutcome lastFetchOutcome();
 

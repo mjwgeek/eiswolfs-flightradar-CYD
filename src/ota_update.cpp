@@ -9,6 +9,15 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#ifdef HOSYOND_CYD40
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
+#if __has_include("hosyond_build_id.h")
+#include "hosyond_build_id.h"
+#else
+#define HOSYOND_BUILD_SHA "unversioned"
+#endif
+#endif
 
 namespace OtaUpdate {
 
@@ -78,11 +87,62 @@ namespace {
 CheckInfo checkForUpdate() {
     CheckInfo info;
 #ifdef HOSYOND_CYD40
-    // Original release firmware is for the 2.8-inch ILI9341; never offer it.
-    Serial.println("[OTA] CYD40 updater disabled (no board-specific release).");
+    // The rolling preview tag is NOT a semantic version. Compare its
+    // current Git commit SHA against the stamped firmware build ID.
+    constexpr const char* TAG_REF_URL =
+        "https://api.github.com/repos/mjwgeek/eiswolfs-flightradar-CYD/git/ref/tags/hosyond-cyd40-preview";
+    constexpr const char* SAFE_CYD40_URL =
+        "https://github.com/mjwgeek/eiswolfs-flightradar-CYD/releases/download/hosyond-cyd40-preview/Flightradar-Hosyond-4.0-Launcher.bin";
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[OTA-CYD40] Wi-Fi disconnected.");
+        return info;
+    }
+    WiFiClientSecure client40;
+    client40.setInsecure();
+    client40.setTimeout(8000);
+    HTTPClient http40;
+    http40.setTimeout(8000);
+    if (!http40.begin(client40, TAG_REF_URL)) {
+        Serial.println("[OTA-CYD40] Could not start GitHub release-ref request.");
+        return info;
+    }
+    http40.setUserAgent("MJWGEEK-HosyondFlightradar-OTA/1.0 (+https://github.com/mjwgeek/eiswolfs-flightradar-CYD)");
+    http40.addHeader("Accept", "application/vnd.github+json");
+    const int code40 = http40.GET();
+    if (code40 != HTTP_CODE_OK) {
+        Serial.printf("[OTA-CYD40] GitHub ref HTTP code=%d\n",code40);
+        http40.end();
+        return info;
+    }
+    JsonDocument filter40;
+    filter40["object"]["sha"] = true;
+    filter40["object"]["type"] = true;
+    JsonDocument doc40;
+    DeserializationError err40 = deserializeJson(
+        doc40, http40.getStream(), DeserializationOption::Filter(filter40));
+    http40.end();
+    if (err40) {
+        Serial.printf("[OTA-CYD40] GitHub JSON error=%s\n",err40.c_str());
+        return info;
+    }
+    const char* sha40 = doc40["object"]["sha"] | "";
+    const char* type40 = doc40["object"]["type"] | "";
+    if (strlen(sha40) != 40 || strcmp(type40,"commit") != 0) {
+        Serial.println("[OTA-CYD40] Not a valid commit tag.");
+        return info;
+    }
+    strncpy(info.latestVersion,sha40,8);
+    info.latestVersion[8]=0;
+    strncpy(info.downloadUrl, SAFE_CYD40_URL, sizeof(info.downloadUrl)-1);
+    info.downloadUrl[sizeof(info.downloadUrl)-1]=0;
+    info.result = strcmp(sha40,HOSYOND_BUILD_SHA)==0
+        ? CheckResult::UpToDate : CheckResult::UpdateAvailable;
+    Serial.printf("[OTA-CYD40] installed=%.12s latest=%.12s status=%s\n",
+                  HOSYOND_BUILD_SHA,sha40,
+                  info.result==CheckResult::UpdateAvailable?"update":"current");
+    applyResult(info);
     return info;
-#endif
-
+#else
     Serial.printf("[OTA] Pruefe auf Update: url=%s freeHeap=%u RSSI=%ddBm\n", RELEASES_API_URL,
                   (unsigned)ESP.getFreeHeap(), WiFi.RSSI());
 
@@ -168,6 +228,7 @@ CheckInfo checkForUpdate() {
                   info.result == CheckResult::UpdateAvailable ? "Update verfuegbar" : "bereits aktuell");
     applyResult(info);
     return info;
+#endif
 }
 
 void pollBackground() {
@@ -179,7 +240,11 @@ void pollBackground() {
     // Intervall wieder pruefen (kein Fehlerfall, passiert z.B. regelmaessig
     // kurz nach dem Booten, bevor WifiMgr verbunden hat).
     if (WiFi.status() != WL_CONNECTED) return;
-
+#ifdef HOSYOND_CYD40
+    // Background GitHub TLS requests should never starve the ADS-B
+    // connection on an ESP32 with <70KB free heap. Manual check remains.
+    if (ESP.getFreeHeap() < 98000 || ESP.getMaxAllocHeap() < 38000) return;
+#endif
     checkForUpdate(); // aktualisiert lastUpdateAvailable/lastAvailableVersion via applyResult()
 }
 
@@ -193,10 +258,35 @@ const char* availableVersion() {
 
 bool performUpdate(const char* url, void (*onProgress)(uint8_t percent)) {
 #ifdef HOSYOND_CYD40
-    (void)url;
-    (void)onProgress;
-    Serial.println("[OTA] Refused incompatible upstream update on CYD40.");
-    return false;
+    // The URL is saved on SD before the restart, so refuse anything
+    // other than this exact public, board-specific application asset.
+    constexpr const char* SAFE_CYD40_URL =
+        "https://github.com/mjwgeek/eiswolfs-flightradar-CYD/releases/download/hosyond-cyd40-preview/Flightradar-Hosyond-4.0-Launcher.bin";
+    if (!url || strcmp(url,SAFE_CYD40_URL)!=0) {
+        Serial.println("[OTA-CYD40] Unsafe OTA URL refused.");
+        return false;
+    }
+    // SD launchers and old full images can use different partitions.
+    // OTA is safe only if the current running application is OTA_0/OTA_1
+    // and a second OTA app slot is large enough for the 4-inch image.
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
+    const bool runningOta = running &&
+        (running->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_0 ||
+         running->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_1);
+    const bool nextOta = next &&
+        (next->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_0 ||
+         next->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_1);
+    if (!runningOta || !nextOta || running->address==next->address ||
+        next->size < 1900000) {
+        Serial.printf("[OTA-CYD40] Unsafe partition layout: running=%s next=%s nextSize=%lu. "
+                      "One-time USB Full.bin installation may be needed.\n",
+                      running?running->label:"none",next?next->label:"none",
+                      (unsigned long)(next?next->size:0));
+        return false;
+    }
+    Serial.printf("[OTA-CYD40] Valid dual-slot layout: current=%s next=%s (%lu bytes)\n",
+                  running->label,next->label,(unsigned long)next->size);
 #endif
     // Diagnose-Logging (nur ueber USB-Seriell sichtbar, kein Einfluss auf
     // die UI) - vorher wurde bei einem Fehlschlag nur ein simples "true/

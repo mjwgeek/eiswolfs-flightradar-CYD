@@ -13,7 +13,11 @@ namespace Config {
     // (kleiner QR-Code unten auf den OTA-Screens) garantiert denselben
     // Text kodieren, statt die URL an zwei Stellen im Code zu duplizieren
     // und dadurch auseinanderlaufen zu koennen.
+#ifdef HOSYOND_CYD40
+    constexpr const char* GITHUB_REPO_URL = "https://github.com/mjwgeek/eiswolfs-flightradar-CYD";
+#else
     constexpr const char* GITHUB_REPO_URL = "https://github.com/Eiswolf-BG/eiswolfs-flightradar-CYD";
+#endif
 
     // Display-Helligkeit (Menue > System > Helligkeit), in Prozent.
     // MIN bewusst nicht 0 - ein komplett dunkles Display koennte sonst wie
