@@ -48,3 +48,17 @@ are still compiled internally, but aren't public Release assets.
 settings. The Launcher image is not the correct input for a complete
 blank-flash installation. This is a hardware-untested preview, not an
 established tested release.
+
+## CYD40 touch and color fix
+
+The XPT2046 touch chip and ST7796S display share one SPI bus. The 4.0 build
+now reads touch pressure and raw X/Y through TFT_eSPI (TOUCH_CS=33) rather
+than initializing an independent XPT2046 SPI host that can corrupt the LCD
+bus. Existing display/touch rotation and saved touch calibration remain
+available. Touch sensitivity and the final coordinates require hands-on
+validation with the 4-inch board.
+
+The CYD40 inversion baseline is reversed relative to the original 2.8-inch
+panel, at the *runtime* invertDisplay() calls (not just the TFT setup macro).
+This also fixes SD cards storing the previous invert=1 value. The original
+2.8-inch firmware keeps its previous behavior.

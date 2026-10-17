@@ -1879,7 +1879,13 @@ void setup() {
     tft.init();
     tft.setRotation(0);
     tft.setFreeFont(&UiFont11pt);
+#ifdef HOSYOND_CYD40
+    // On the reported 4.0" panel, invertDisplay(true) yields white
+    // background with magenta text. The correct baseline is false.
+    tft.invertDisplay(false);
+#else
     tft.invertDisplay(true);
+#endif
     tft.fillScreen(TFT_BLACK);
 
     // VOR dem ersten ledcWrite()/normalBacklightPwm()-Aufruf unten - sonst
@@ -1919,7 +1925,13 @@ void setup() {
     }
 
     SettingsStore::load();
+#ifdef HOSYOND_CYD40
+    // Invert the 2.8-inch preference semantics for this Hosyond panel.
+    // Crucially, this also corrects OLD SD cards with invert=1 saved.
+    tft.invertDisplay(!SettingsStore::displayInverted());
+#else
     tft.invertDisplay(SettingsStore::displayInverted());
+#endif
     // 180-Grad-Drehung fuer Tischmontage (Menue > System > Anzeige) -
     // Rotation 2 ist bei diesem Panel/Treiber das 180-Grad-Gegenstueck zu
     // Rotation 0 (beide Portrait, gleiche 240x320-Aufloesung, nur gespiegelt

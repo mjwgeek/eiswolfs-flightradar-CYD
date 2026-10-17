@@ -1555,7 +1555,11 @@ void run(TFT_eSPI& tft, bool startAtFilters, bool startAtSystem) {
             } else if (invertBtn.contains(tap.x, tap.y)) {
                 bool newState = !SettingsStore::displayInverted();
                 SettingsStore::setDisplayInverted(newState);
+#ifdef HOSYOND_CYD40
+                tft.invertDisplay(!newState);
+#else
                 tft.invertDisplay(newState);
+#endif
             } else if (radarThemeBtn.contains(tap.x, tap.y)) {
                 RadarThemeScreen::run(tft);
             } else if (rotateBtn.contains(tap.x, tap.y)) {

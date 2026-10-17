@@ -3,12 +3,20 @@
 #include <SPI.h>
 #include <XPT2046_Touchscreen.h>
 #include <SD.h>
+#ifdef HOSYOND_CYD40
+#include <TFT_eSPI.h>
+// TFT_eSPI owns the shared ST7796S / XPT2046 SPI bus.
+extern TFT_eSPI tft;
+#endif
 
 namespace TouchInput {
 
 namespace {
+#ifndef HOSYOND_CYD40
+    // The original 2.8-inch board has a dedicated touch SPI peripheral.
     SPIClass touchSpi(VSPI);
     XPT2046_Touchscreen touch(Config::TOUCH_CS_PIN, Config::TOUCH_IRQ_PIN);
+#endif
 
     constexpr int16_t MARGIN_PX = 24; // Abstand der Kalibrierungspunkte vom Rand
 
@@ -45,10 +53,19 @@ namespace {
 }
 
 void begin() {
+#ifdef HOSYOND_CYD40
+    // Shared panel SPI: never call SPIClass.begin() a second time on these
+    // pins or the XPT2046 and ST7796S will fight over the same host.
+    // The TFT_eSPI touch implementation uses TOUCH_CS=33 from the setup.
+    pinMode(Config::TOUCH_CS_PIN, OUTPUT);
+    digitalWrite(Config::TOUCH_CS_PIN, HIGH);
+    Serial.println("[CYD40] Touch on TFT_eSPI shared SPI bus");
+#else
     touchSpi.begin(Config::TOUCH_CLK_PIN, Config::TOUCH_MISO_PIN,
                     Config::TOUCH_MOSI_PIN, Config::TOUCH_CS_PIN);
     touch.begin(touchSpi);
     touch.setRotation(0);
+#endif
     lastTapMs = millis();
 }
 
@@ -101,16 +118,30 @@ void saveCalibration() {
 
 Point rawPoint() {
     Point p;
+#ifdef HOSYOND_CYD40
+    // SquachWatch CYD40 pattern: pressure-gate FIRST because
+    // TFT_eSPI::getTouchRaw() itself reports values even with no finger.
+    const uint16_t pressure = tft.getTouchRawZ();
+    p.touched = pressure >= 350;
+    if (p.touched) {
+        uint16_t rx=0, ry=0;
+        tft.getTouchRaw(&rx,&ry);
+        p.x = rx; p.y = ry;
+        lastRawSampleValue.x = rx;
+        lastRawSampleValue.y = ry;
+        lastRawSampleValue.z = pressure;
+    }
+#else
     p.touched = touch.touched();
     if (p.touched) {
         TS_Point raw = touch.getPoint();
         p.x = raw.x;
         p.y = raw.y;
-        // TEST DIAG - siehe RawSample oben, rein passives Mitschreiben.
         lastRawSampleValue.x = raw.x;
         lastRawSampleValue.y = raw.y;
         lastRawSampleValue.z = raw.z;
     }
+#endif
     return p;
 }
 
