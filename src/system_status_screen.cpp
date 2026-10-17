@@ -8,6 +8,9 @@
 #include "config.h"
 #include "i18n.h"
 #include "ui_theme.h"
+#ifdef HOSYOND_CYD40
+#include "hosyond_battery.h"
+#endif
 #include <WiFi.h>
 
 namespace SystemStatusScreen {
@@ -122,6 +125,24 @@ void run(TFT_eSPI& tft) {
             : String(I18n::t(StringId::CONNECTION_STATUS_RESULT_NONE));
         y = layoutWrapped(tft, LINE_X, y, LINE_MAX_W, LINE_H,
                            String(I18n::t(StringId::SYSTEM_STATUS_FETCH_DURATION_PREFIX)) + durationValue);
+
+
+#ifdef HOSYOND_CYD40
+        // Live Hosyond GPIO34 battery readout. Divider and 40mV charge-trend
+        // logic are the same as SquachWatch's CYD40 implementation.
+        const HosyondBattery::Reading& bat=HosyondBattery::sample();
+        char batteryText[48];
+        if (!bat.present) snprintf(batteryText,sizeof batteryText,"Battery: none");
+        else snprintf(batteryText,sizeof batteryText,"Battery: %u%% %u.%02u V%s",
+                      (unsigned)bat.pct,(unsigned)(bat.mv/1000),
+                      (unsigned)(bat.mv%1000/10),
+                      bat.chargingEstimated?"  (charging?)":"");
+        y = layoutWrapped(tft, LINE_X, y, LINE_MAX_W, LINE_H,
+                          String(batteryText));
+        if (bat.present && bat.chargingEstimated)
+            HosyondBattery::drawChargingBolt(tft,
+                (int16_t)(LINE_MAX_W-8), (int16_t)(y-LINE_H+2), TFT_YELLOW);
+#endif
 
         // Aktuelle PerfTuner-Stufe (perf_tuner.h, Alex' Wunsch: unauffaelliger
         // Hinweis hier statt eines eigenen Panels) - nur bei Stufe > 0 die

@@ -52,6 +52,9 @@
 #include "changelog.h"
 #include "ota_update.h"
 #include "auto_brightness.h"
+#ifdef HOSYOND_CYD40
+#include "hosyond_battery.h"
+#endif
 #include "web_export_server.h"
 #include <math.h>
 
@@ -1388,6 +1391,16 @@ void updateWifiIcon() {
     if (WiFi.status() == WL_CONNECTED) {
         drawWifiIcon(Config::SCREEN_WIDTH - 4, iconY, WIFI_ICON_H, WiFi.RSSI());
     }
+#ifdef HOSYOND_CYD40
+    // The header is tightly packed. The bottom of the Wi-Fi icon's column
+    // (y=17..27) is free; place the charging symbol there, with no
+    // displacement of existing taps/menu/clock. ADC reads are cached 2s.
+    tft.fillRect(iconX + 4, 16, 14, 13, TFT_BLACK);
+    const HosyondBattery::Reading& b = HosyondBattery::sample();
+    if (b.present && b.chargingEstimated) {
+        HosyondBattery::drawChargingBolt(tft, iconX + 7, 16, TFT_YELLOW);
+    }
+#endif
 }
 
 // Vollbild-QR-Code, der auf das GitHub-Repository des Projekts verlinkt.
