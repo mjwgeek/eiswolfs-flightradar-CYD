@@ -35,13 +35,20 @@ namespace {
 }
 
 void begin() {
+#ifdef HOSYOND_CYD40
+    // GPIO34 measures battery voltage, not ambient light.
+    lastPercent = Config::BRIGHTNESS_MAX_PERCENT;
+#else
     pinMode(Config::LDR_PIN, INPUT);
     sample();
+#endif
 }
 
 void update() {
+#ifndef HOSYOND_CYD40
     if (!SettingsStore::autoBrightnessEnabled()) return;
     sample();
+#endif
 }
 
 uint8_t currentPercent() { return lastPercent; }

@@ -336,21 +336,35 @@ namespace Config {
     constexpr const char* SD_SCREENSHOT_DIR         = "/Flightradar_cyd/screenshots";
     constexpr const char* SD_SETTINGS_FILE         = "/Flightradar_cyd/config.txt";
     constexpr const char* SD_WIFI_CREDENTIALS_FILE = "/Flightradar_cyd/wifi.txt";
+#ifdef HOSYOND_CYD40
+    constexpr const char* SD_CALIBRATION_FILE      = "/Flightradar_cyd/calibration_cyd40.txt";
+#else
     constexpr const char* SD_CALIBRATION_FILE      = "/Flightradar_cyd/calibration.txt";
+#endif
 
     constexpr uint8_t SD_SPI_CS_PIN   = 5;
     constexpr uint8_t SD_SPI_MOSI_PIN = 23;
     constexpr uint8_t SD_SPI_MISO_PIN = 19;
     constexpr uint8_t SD_SPI_CLK_PIN  = 18;
 
+#ifdef HOSYOND_CYD40
+    // XPT2046 shares ST7796S SPI wires. Native portrait display geometry.
+    constexpr uint8_t TOUCH_CLK_PIN  = 14;
+    constexpr uint8_t TOUCH_CS_PIN   = 33;
+    constexpr uint8_t TOUCH_MOSI_PIN = 13;
+    constexpr uint8_t TOUCH_MISO_PIN = 12;
+    constexpr uint8_t TOUCH_IRQ_PIN  = 36;
+    constexpr int16_t SCREEN_WIDTH  = 320;
+    constexpr int16_t SCREEN_HEIGHT = 480;
+#else
     constexpr uint8_t TOUCH_CLK_PIN  = 25;
     constexpr uint8_t TOUCH_CS_PIN   = 33;
     constexpr uint8_t TOUCH_MOSI_PIN = 32;
     constexpr uint8_t TOUCH_MISO_PIN = 39;
     constexpr uint8_t TOUCH_IRQ_PIN  = 36;
-
     constexpr int16_t SCREEN_WIDTH  = 240;
     constexpr int16_t SCREEN_HEIGHT = 320;
+#endif
 
     constexpr float ZONE_BLUE_KM   = 25.0f;
     constexpr float ZONE_YELLOW_KM = 10.0f;

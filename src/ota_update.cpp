@@ -77,6 +77,11 @@ namespace {
 
 CheckInfo checkForUpdate() {
     CheckInfo info;
+#ifdef HOSYOND_CYD40
+    // Original release firmware is for the 2.8-inch ILI9341; never offer it.
+    Serial.println("[OTA] CYD40 updater disabled (no board-specific release).");
+    return info;
+#endif
 
     Serial.printf("[OTA] Pruefe auf Update: url=%s freeHeap=%u RSSI=%ddBm\n", RELEASES_API_URL,
                   (unsigned)ESP.getFreeHeap(), WiFi.RSSI());
@@ -187,6 +192,12 @@ const char* availableVersion() {
 }
 
 bool performUpdate(const char* url, void (*onProgress)(uint8_t percent)) {
+#ifdef HOSYOND_CYD40
+    (void)url;
+    (void)onProgress;
+    Serial.println("[OTA] Refused incompatible upstream update on CYD40.");
+    return false;
+#endif
     // Diagnose-Logging (nur ueber USB-Seriell sichtbar, kein Einfluss auf
     // die UI) - vorher wurde bei einem Fehlschlag nur ein simples "true/
     // false" nach aussen gegeben, ohne den eigentlichen Grund (Timeout,

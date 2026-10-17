@@ -7,6 +7,12 @@ namespace {
     // Eigener LEDC-Kanal, getrennt von Backlight (0, main.cpp) und der
     // RGB-Status-LED (1-3, led_alert.cpp).
     constexpr uint8_t SPK_PWM_CHANNEL = 4;
+#ifdef HOSYOND_CYD40
+    constexpr uint8_t AMP_ENABLE_PIN = 4; // Active LOW
+    void amplifierEnabled(bool enabled) {
+        digitalWrite(AMP_ENABLE_PIN, enabled ? LOW : HIGH);
+    }
+#endif
 
     // Zwei feste Toene im Wechsel (Alex' Wunsch: "grob im Stil des
     // Web-Alarmtons", der dort zwischen 400-1000Hz durchgaengig
@@ -34,6 +40,10 @@ namespace {
 }
 
 void begin() {
+#ifdef HOSYOND_CYD40
+    digitalWrite(AMP_ENABLE_PIN, HIGH);
+    pinMode(AMP_ENABLE_PIN, OUTPUT);
+#endif
     ledcSetup(SPK_PWM_CHANNEL, TONE_LOW_HZ, 10);
     ledcAttachPin(Config::SPK_PIN, SPK_PWM_CHANNEL);
     ledcWriteTone(SPK_PWM_CHANNEL, 0); // still, bis update() den ersten Ton ausloest
@@ -43,6 +53,9 @@ void update(bool emergencyActive, bool newWatchHit) {
     uint32_t now = millis();
 
     if (emergencyActive) {
+#ifdef HOSYOND_CYD40
+        amplifierEnabled(true);
+#endif
         // Sirene hat Vorrang - ein eventuell noch laufender Einzelton wird
         // verworfen, siehe Kommentar in speaker_alert.h.
         watchBeepEndMs = 0;
@@ -58,6 +71,9 @@ void update(bool emergencyActive, bool newWatchHit) {
     if (newWatchHit) watchBeepEndMs = now + WATCH_BEEP_MS;
 
     if (watchBeepEndMs != 0 && now < watchBeepEndMs) {
+#ifdef HOSYOND_CYD40
+        amplifierEnabled(true);
+#endif
         if (!toneActive) {
             ledcWriteTone(SPK_PWM_CHANNEL, WATCH_BEEP_HZ);
             toneActive = true;
@@ -70,6 +86,9 @@ void update(bool emergencyActive, bool newWatchHit) {
         ledcWriteTone(SPK_PWM_CHANNEL, 0);
         toneActive = false;
     }
+#ifdef HOSYOND_CYD40
+    amplifierEnabled(false);
+#endif
 }
 
 }

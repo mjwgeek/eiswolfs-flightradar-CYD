@@ -5,7 +5,12 @@
 namespace LedAlert {
 
 namespace {
+#ifdef HOSYOND_CYD40
+    // GPIO4 controls the amplifier, NOT the red LED.
+    constexpr uint8_t PIN_RED   = 22;
+#else
     constexpr uint8_t PIN_RED   = 4;
+#endif
     constexpr uint8_t PIN_GREEN = 16;
     constexpr uint8_t PIN_BLUE  = 17;
 
