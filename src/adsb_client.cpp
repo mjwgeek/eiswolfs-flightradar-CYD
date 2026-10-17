@@ -173,6 +173,9 @@ FetchResult fetch(double homeLat, double homeLon, float radiusKm,
         clientConfigured = true;
     }
 
+    // Client is reused as an object only, not as a live TLS connection.
+    // Ensure an earlier unsuccessful handshake hasn't retained any socket.
+    persistentClient.stop();
     HTTPClient http;
     char url[160];
     snprintf(url, sizeof(url),
@@ -181,6 +184,9 @@ FetchResult fetch(double homeLat, double homeLon, float radiusKm,
 
     http.setTimeout(Config::ADSB_HTTP_TIMEOUT_MS);
     if (!http.begin(persistentClient, url)) {
+        Serial.printf("[ADSB-HTTP] begin() failed; wifi=%d rssi=%d heap=%u maxAlloc=%u\n",
+                      (int)WiFi.status(), (int)WiFi.RSSI(),
+                      (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
         return result;
     }
     // Kein Connection-Reuse mehr (siehe Design-Absprache): das neue
@@ -191,7 +197,14 @@ FetchResult fetch(double homeLat, double homeLon, float radiusKm,
     // (~900ms laut Messung, siehe Chat) passt komfortabel in
     // ADSB_HTTP_TIMEOUT_MS und den Fetch-Zyklus.
     http.setReuse(false);
+#ifdef HOSYOND_CYD40
+    // Accurately identify this independent fork for service diagnostics.
+    // This does NOT give us an extra rate-limit allowance; a provider can
+    // rate-limit by IP, account, server load, or other criteria.
+    http.setUserAgent("MJWGEEK-HosyondFlightradar/1.1 (+https://github.com/mjwgeek/eiswolfs-flightradar-CYD)");
+#else
     http.setUserAgent("EiswolfsFlightradarCYD/1.0 (+https://github.com/Eiswolf-BG/eiswolfs-flightradar-CYD)");
+#endif
     http.addHeader("Accept", "application/json");
     // TESTWEISE - Backoff-Logik in net_task.cpp respektiert einen vom
     // Server mitgeschickten "Retry-After"-Header bei HTTP 429, statt nur
@@ -202,6 +215,17 @@ FetchResult fetch(double homeLat, double homeLon, float radiusKm,
 
     int code = http.GET();
     result.httpCode = code;
+    if (code < 0) {
+        // -11 is a read timeout. Other negative HTTPClient results may
+        // indicate connect/TLS failure, lost socket, or resource exhaustion.
+        // Do not collapse all failures into a "Wi-Fi signal poor" report.
+        Serial.printf("[ADSB-HTTP] GET FAILED code=%d meaning=%s wifi=%d rssi=%d heap=%u maxAlloc=%u\n",
+                      code, http.errorToString(code).c_str(),
+                      (int)WiFi.status(), (int)WiFi.RSSI(),
+                      (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+    } else if (code != HTTP_CODE_OK) {
+        Serial.printf("[ADSB-HTTP] HTTP status=%d (not a Wi-Fi RSSI reading)\n", code);
+    }
 
     if (code == 429) {
         String retryAfter = http.header("Retry-After");

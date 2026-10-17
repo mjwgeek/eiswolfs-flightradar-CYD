@@ -77,3 +77,24 @@ axes, reject degenerate measurements and are stored as `H40V2`.
 The old `calibration_cyd40.txt` is deliberately rejected once so the
 proper calibration is requested on the next boot after flashing.
 The 2.8-inch CYD keeps its previous calibration file and format.
+
+## ADS-B feed identity and transport diagnostics
+
+The Hosyond fork sends a truthful, independent HTTP User-Agent:
+`MJWGEEK-HosyondFlightradar/1.1 (+https://github.com/mjwgeek/eiswolfs-flightradar-CYD)`.
+This is an application identifier for provider diagnostics, **not** a new
+rate-limit account, per-device tracking ID or a way to evade rate limits.
+ADSB.lol uses dynamic limits depending on its load, and actual HTTP 429
+responses still trigger the existing Retry-After/backoff path.
+
+The device disables ESP32 Wi-Fi modem sleep during network connections,
+which may improve HTTPS latency but uses additional battery power.
+Connection Status now labels the data feed separately from the router's
+actual RSSI, and displays the specific error code. Only HTTPClient error
+**-11** is labeled timeout; e.g. **-1** means connection failure, and
+**429** means the upstream explicitly rate-limited the request.
+On serial at 115200 baud, `[ADSB-HTTP]` records exact negative codes,
+Wi-Fi RSSI, free heap, and largest allocatable block so we can identify
+TLS fragmentation/resource failures. Existing bounded retry/backoff and
+JSON streaming parse remain unchanged. No hardware connectivity fix is
+claimed until the ESP32's actual error codes are observed.

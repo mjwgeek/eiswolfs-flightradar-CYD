@@ -210,6 +210,11 @@ void removeNetwork(uint8_t index) {
 
 void connectTo(const char* ssid, const char* password) {
     WiFi.mode(WIFI_STA);
+#ifdef HOSYOND_CYD40
+    // The radar relies on periodic TLS downloads. Disabling ESP32 modem
+    // sleep avoids wakeup-related delays; it may consume more battery.
+    WiFi.setSleep(false);
+#endif
     WiFi.begin(ssid, password);
     connectStartMs = millis();
     setState(State::Connecting);

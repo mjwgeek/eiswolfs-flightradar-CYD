@@ -6,6 +6,7 @@
 #include "touch_input.h"
 #include "menu_stars.h"
 #include "ui_theme.h"
+#include <WiFi.h>
 
 namespace ConnectionStatusScreen {
 
@@ -118,6 +119,17 @@ void run(TFT_eSPI& tft) {
         int16_t y = 40;
 
         tft.setTextColor(UiTheme::accentColor(tft), TFT_BLACK);
+#ifdef HOSYOND_CYD40
+        // This screen rates age of ADS-B data, NOT the strength of the
+        // connected Wi-Fi router. Show RSSI separately to prevent confusion.
+        y += drawPrefixedLine(tft, LINE_X, y, LINE_MAX_W, LINE_H,
+                              "ADSB.lol data feed", "");
+        const String wifiRssi = (WiFi.status() == WL_CONNECTED)
+             ? String(WiFi.RSSI()) + " dBm"
+             : String("disconnected");
+        y += drawPrefixedLine(tft, LINE_X, y, LINE_MAX_W, LINE_H,
+                              "Wi-Fi RSSI: ", wifiRssi);
+#endif
         y += drawPrefixedLine(tft, LINE_X, y, LINE_MAX_W, LINE_H,
                                I18n::t(StringId::CONNECTION_STATUS_TRACKED_PREFIX), String(tracked));
 
@@ -138,8 +150,11 @@ void run(TFT_eSPI& tft) {
             resultText = I18n::t(StringId::CONNECTION_STATUS_RESULT_NONE);
         } else if (outcome.ok) {
             resultText = I18n::t(StringId::CONNECTION_STATUS_RESULT_SUCCESS);
-        } else if (outcome.httpCode <= 0) {
-            resultText = I18n::t(StringId::CONNECTION_STATUS_RESULT_TIMEOUT);
+        } else if (outcome.httpCode == -11) {
+            // Only HTTPClient's read-timeout code is definitively a timeout.
+            resultText = String(I18n::t(StringId::CONNECTION_STATUS_RESULT_TIMEOUT)) + " (-11)";
+        } else if (outcome.httpCode == 0) {
+            resultText = I18n::t(StringId::CONNECTION_STATUS_RESULT_NONE);
         } else {
             resultText = String(I18n::t(StringId::CONNECTION_STATUS_RESULT_ERROR_PREFIX)) + outcome.httpCode;
         }
