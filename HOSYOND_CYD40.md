@@ -130,3 +130,22 @@ under 95 KB free heap or 38 KB maximum allocatable block and until
 recent ADS-B success. Serial outputs [WEATHER-SKIP]. The 4.0 touch input
 registers a debounced press (rather than a release event) and expands
 the vertical hit targets of Menu and Mode. Serial outputs [TOUCH-H40].
+
+## SD-backed JSON scratch (CYD40)
+
+The Hosyond firmware can use its FAT32 SD card for a bounded temporary
+weather-response spool (`/Flightradar_cyd/.weather-fetch.tmp`, up to 64KB).
+`HTTPClient::writeToStream` decodes HTTP chunked transfers directly into
+small SD writes guarded by the recursive SD mutex; the large HTTP response
+is not materialized as a heap String. After the transfer completes, HTTPS
+is closed before the file is parsed with a selective ArduinoJson filter,
+and the scratch file is deleted on both success and failure. A leftover
+scratch file after a reset is removed on the next request.
+
+This is **temporary file storage, not VRAM/PSRAM/swap**: it cannot back the
+TFT framebuffer, ESP32 heap or mbedTLS handshake buffers. It can reduce
+peak memory during weather parsing. Weather is attempted only after recent
+successful ADS-B reception and if available heap is >=65KB with >=36KB
+contiguous; optional METAR/hexdb HTTPS fetches are skipped if heap is below
+90KB or maxAlloc below 42KB. A weather retry happens at most on its normal
+5-minute interval. System behavior still requires real-board verification.

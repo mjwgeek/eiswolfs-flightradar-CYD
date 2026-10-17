@@ -643,7 +643,11 @@ namespace {
             const bool weatherCanRun =
                 lastAdsb.hasResult && lastAdsb.ok &&
                 AircraftTable::msSinceLastSuccessfulFetch(millis()) < 15000 &&
-                weatherFreeHeap >= 95000 && weatherLargest >= 38000;
+                // With the CYD40 SD-spooled Open-Meteo parser, the full
+                // weather JSON no longer needs a heap String. Allow a
+                // cautious low-memory test, but only with adequate
+                // contiguous space for a TLS handshake.
+                weatherFreeHeap >= 65000 && weatherLargest >= 36000;
             if (weatherCanRun) {
                 Weather::update();
             } else {

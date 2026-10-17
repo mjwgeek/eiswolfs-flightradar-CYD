@@ -8,6 +8,11 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <math.h>
+#ifdef HOSYOND_CYD40
+#include "sd_storage.h"
+#include "sd_mutex.h"
+#include <SD.h>
+#endif
 
 namespace Weather {
 
@@ -41,6 +46,104 @@ namespace {
     // Weather::Forecast in weather.h) - eine einzelne konstante Stundenzahl,
     // kein einstellbarer Wert, um die Sache bewusst einfach zu halten.
     constexpr uint8_t FORECAST_HOURS_AHEAD = 3;
+
+#ifdef HOSYOND_CYD40
+    // Store decoded HTTPS payload bytes on SD, not in an accumulating RAM
+    // String. SD is scratch storage, never RAM, PSRAM, or the framebuffer.
+    constexpr const char* WEATHER_TEMP_FILE = "/Flightradar_cyd/.weather-fetch.tmp";
+    constexpr size_t WEATHER_TEMP_MAX_BYTES = 64 * 1024;
+
+    // HTTPClient::writeToStream handles HTTP chunked transfer decoding.
+    // Protect just each SD write, rather than holding the SD mutex during
+    // the entire network wait (which could stall UI/other card accesses).
+    class WeatherScratchSink : public Stream {
+    public:
+        explicit WeatherScratchSink(File& file): file_(file) {}
+        size_t write(uint8_t b) override { return write(&b, 1); }
+        size_t write(const uint8_t* data, size_t len) override {
+            if (length_ + len > WEATHER_TEMP_MAX_BYTES) {
+                overLimit_ = true;
+                return 0;
+            }
+            SdMutex::Guard guard;
+            const size_t n = file_.write(data,len);
+            length_ += n;
+            return n;
+        }
+        int available() override { return 0; }
+        int read() override { return -1; }
+        int peek() override { return -1; }
+        void flush() override {
+            SdMutex::Guard guard;
+            file_.flush();
+        }
+        bool overLimit() const { return overLimit_; }
+    private:
+        File& file_;
+        size_t length_ = 0;
+        bool overLimit_ = false;
+    };
+
+    // Called only from NetTask. Always consume the HTTP response, close TLS
+    // and delete scratch before returning; never retain large weather JSON
+    // and mbedTLS buffers simultaneously.
+    bool parseWeatherUsingSd(HTTPClient& http, JsonDocument& doc) {
+        if (!SdStorage::isMounted()) {
+            Serial.println("[WEATHER-SD] SD not mounted, skipped.");
+            http.end();
+            return false;
+        }
+        File scratch;
+        {
+            SdMutex::Guard guard;
+            SD.remove(WEATHER_TEMP_FILE); // stale file from a reset
+            scratch = SD.open(WEATHER_TEMP_FILE, FILE_WRITE);
+        }
+        if (!scratch) {
+            Serial.println("[WEATHER-SD] Cannot create temporary file.");
+            http.end();
+            return false;
+        }
+        WeatherScratchSink sink(scratch);
+        const int bytes = http.writeToStream(&sink);
+        {
+            SdMutex::Guard guard;
+            scratch.flush();
+            scratch.close();
+        }
+        http.end(); // free network/TLS resources BEFORE JSON allocation
+
+        bool parsed = false;
+        if (bytes > 0 && !sink.overLimit()) {
+            JsonDocument filter;
+            filter["current_weather"]["weathercode"] = true;
+            filter["current_weather"]["winddirection"] = true;
+            filter["current_weather"]["windspeed"] = true;
+            filter["hourly"]["temperature_2m"][0] = true;
+            filter["hourly"]["weathercode"][0] = true;
+            filter["hourly"]["precipitation_probability"][0] = true;
+            SdMutex::Guard guard;
+            File data = SD.open(WEATHER_TEMP_FILE, FILE_READ);
+            if (data) {
+                const DeserializationError e =
+                    deserializeJson(doc, data, DeserializationOption::Filter(filter));
+                parsed = !e;
+                if (e) Serial.printf("[WEATHER-SD] JSON parse: %s\n", e.c_str());
+                data.close();
+            }
+        } else {
+            Serial.printf("[WEATHER-SD] Fetch failed (%d bytes) or exceeded 64KB limit.\n",bytes);
+        }
+        {
+            SdMutex::Guard guard;
+            SD.remove(WEATHER_TEMP_FILE);
+        }
+        Serial.printf("[WEATHER-SD] %d bytes spooled, parsed=%d, heap=%u maxAlloc=%u\n",
+                      bytes, (int)parsed,
+                      (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+        return parsed;
+    }
+#endif
 
     // aviationweather.gov liefert bei format=json ein JSON-ARRAY (auch fuer
     // eine einzelne angefragte Station) - Feld "rawOb" enthaelt den
@@ -299,16 +402,18 @@ namespace {
         bool havePrecip = false;
         bool haveWeatherData = false;
         {
-            // Body erst komplett als String einsammeln (getString() kuemmert
-            // sich zuverlaessig um Chunked-Transfer-Encoding), statt direkt aus
-            // http.getStream() zu parsen - Letzteres scheiterte bei Open-Meteo
-            // zuverlaessig mit einem ArduinoJson-"InvalidInput"-Fehler.
+            JsonDocument doc;
+#ifdef HOSYOND_CYD40
+            // SD-backed spool replaces getString() (full response in heap).
+            // HTTPClient decodes chunked bodies into the scratch file.
+            // The scratch is gone before other TLS hosts are contacted.
+            if (!parseWeatherUsingSd(http, doc)) return;
+#else
             String body = http.getString();
             http.end();
-
-            JsonDocument doc;
             DeserializationError err = deserializeJson(doc, body);
             if (err) return;
+#endif
 
             int wmoCode = doc["current_weather"]["weathercode"] | -1;
             if (wmoCode < 0) return;
@@ -384,6 +489,17 @@ namespace {
         currentForecastData = forecast;
         currentHourlyTimelineData = timeline;
         if (havePrecip) currentPrecipProbVal = precipProb;
+
+#ifdef HOSYOND_CYD40
+        // Only one low-memory TLS request (Open-Meteo) is attempted per
+        // weather interval. Additional METAR + hexdb handshakes are
+        // deferred when the board does not have enough free heap.
+        if (ESP.getFreeHeap() < 90000 || ESP.getMaxAllocHeap() < 42000) {
+            Serial.printf("[WEATHER-SD] Forecast parsed; skip METAR/IATA low heap=%u maxAlloc=%u\n",
+                          (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+            return;
+        }
+#endif
 
         // METAR-Flugwetterbericht fuer den naechstgelegenen Flughafen - im
         // selben Aufruf/Intervall wie das Icon-Wetter oben, damit dafuer
