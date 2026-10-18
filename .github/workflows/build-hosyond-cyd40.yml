@@ -27,9 +27,20 @@ jobs:
           printf '#pragma once\n#define HOSYOND_BUILD_SHA "%s"\n' "$GITHUB_SHA" > include/hosyond_build_id.h
       - name: Build 4.0-inch firmware
         run: pio run -e hosyond-cyd40
-      - name: Check flash images
+      - name: Check flash images and OTA identity
         run: |
           test -s .pio/build/hosyond-cyd40/firmware.bin
+          # Prevent publishing an OTA binary that cannot recognize itself.
+          # The full SHA must appear in the compiled app, not only a header.
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          firmware = Path(".pio/build/hosyond-cyd40/firmware.bin").read_bytes()
+          sha = os.environ["GITHUB_SHA"].encode("ascii")
+          assert len(sha) == 40, "Invalid GitHub commit ID"
+          assert sha in firmware, "Missing OTA build ID in firmware image"
+          print("Verified OTA build identity:", sha.decode())
+          PY
           test -s .pio/build/hosyond-cyd40/bootloader.bin
           test -s .pio/build/hosyond-cyd40/partitions.bin
       - name: Assemble full flash and Launcher images
