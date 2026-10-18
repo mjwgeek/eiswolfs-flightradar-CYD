@@ -42,13 +42,31 @@ jobs:
           test "$bytes" -le 1966080
           grep -F 'APP_VERSION = "6.9.3"' src/config.h
           cp .pio/build/esp32dev/firmware.bin firmware.bin
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("index.html")
+          s = p.read_text(encoding="utf-8")
+          before = '<span id="versionLabel">v6.9.2</span>'
+          after = '<span id="versionLabel">v6.9.3</span>'
+          if before not in s and after not in s:
+              raise SystemExit("Web flasher version marker not found")
+          s = s.replace(before, after)
+          before_option = '<option value="manifest.json" data-version="v6.9.2" selected>v6.9.2 (latest)</option>'
+          after_option = '<option value="manifest.json" data-version="v6.9.3" selected>v6.9.3 (latest)</option>'
+          if before_option not in s and after_option not in s:
+              raise SystemExit("Web flasher latest-version option not found")
+          s = s.replace(before_option, after_option)
+          s = s.replace("https://github.com/Eiswolf-BG/eiswolfs-flightradar-CYD",
+                        "https://github.com/mjwgeek/eiswolfs-flightradar-CYD")
+          p.write_text(s, encoding="utf-8")
+          PY
       - name: Update web-flasher binary on main
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add firmware.bin
+          git add firmware.bin index.html
           if ! git diff --cached --quiet; then
             git commit -m "build: publish FlightRadar v6.9.3 firmware.bin"
             git push origin HEAD:main
