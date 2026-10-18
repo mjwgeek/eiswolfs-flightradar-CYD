@@ -30,6 +30,13 @@ jobs:
           python-version: "3.12"
       - name: Install PlatformIO
         run: python -m pip install --disable-pip-version-check "platformio>=6.1,<7"
+      - name: Read firmware version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python -c 'import re; from pathlib import Path; s=Path("src/config.h").read_text(); m=re.search(r"APP_VERSION\\s*=\\s*\\\"(\\d+\\.\\d+\\.\\d+)\\\"", s); print(m.group(1) if m else "")')
+          test -n "$version"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
       - name: Build ESP32 firmware
         run: pio run -e esp32dev
       - name: Validate OTA binary and version
@@ -40,24 +47,26 @@ jobs:
           bytes=$(stat -c '%s' .pio/build/esp32dev/firmware.bin)
           echo "Firmware bytes: $bytes"
           test "$bytes" -le 1966080
-          grep -F 'APP_VERSION = "6.9.3"' src/config.h
+          echo "Releasing firmware version $VERSION"
           cp .pio/build/esp32dev/firmware.bin firmware.bin
           python - <<'PY'
           from pathlib import Path
           p = Path("index.html")
           s = p.read_text(encoding="utf-8")
-          before = '<span id="versionLabel">v6.9.2</span>'
-          after = '<span id="versionLabel">v6.9.3</span>'
-          if before not in s and after not in s:
-              raise SystemExit("Web flasher version marker not found")
-          s = s.replace(before, after)
-          before_option = '<option value="manifest.json" data-version="v6.9.2" selected>v6.9.2 (latest)</option>'
-          after_option = '<option value="manifest.json" data-version="v6.9.3" selected>v6.9.3 (latest)</option>'
-          if before_option not in s and after_option not in s:
-              raise SystemExit("Web flasher latest-version option not found")
-          s = s.replace(before_option, after_option)
+          import os
+          import re
+          version = os.environ["VERSION"]
+          old = s
+          s = re.sub(r'(id="versionLabel">)v[0-9]+\\.[0-9]+\\.[0-9]+',
+                     lambda m: m.group(1) + "v" + version, s, count=1)
+          s = re.sub(
+              r'(<option value="manifest\\.json" data-version=")v[0-9]+\\.[0-9]+\\.[0-9]+(" selected>)v[0-9]+\\.[0-9]+\\.[0-9]+( \\(latest\\)</option>)',
+              lambda m: m.group(1) + "v" + version + m.group(2) + "v" + version + m.group(3),
+              s, count=1)
           s = s.replace("https://github.com/Eiswolf-BG/eiswolfs-flightradar-CYD",
                         "https://github.com/mjwgeek/eiswolfs-flightradar-CYD")
+          if s == old:
+              raise SystemExit("No web installer version/source changes detected")
           p.write_text(s, encoding="utf-8")
           PY
       - name: Update web-flasher binary on main
@@ -68,7 +77,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add firmware.bin index.html
           if ! git diff --cached --quiet; then
-            git commit -m "build: publish FlightRadar v6.9.3 firmware.bin"
+            git commit -m "build: publish FlightRadar v${VERSION} firmware.bin"
             git push origin HEAD:main
           fi
       - name: Publish OTA GitHub release
@@ -77,14 +86,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view v6.9.3 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload v6.9.3 firmware.bin --clobber --repo "$GITHUB_REPOSITORY"
-            gh release edit v6.9.3 --latest --repo "$GITHUB_REPOSITORY"
+          if gh release view v${VERSION} --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v${VERSION} firmware.bin --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit v${VERSION} --latest --repo "$GITHUB_REPOSITORY"
           else
-            gh release create v6.9.3 firmware.bin \
+            gh release create v${VERSION} firmware.bin \
               --repo "$GITHUB_REPOSITORY" \
               --target main \
-              --title "FlightRadar v6.9.3 - ADSB.fi primary and fork OTA" \
+              --title ""FlightRadar v${VERSION} - ADSB.fi primary and fork OTA"" \
               --notes "ADSB.fi v3 is the preferred aircraft feed; ADSB.lol is the fallback. Includes streaming/TLS error handling and kilometer-to-nautical-mile correction. Firmware OTA checks now target mjwgeek's releases." \
               --latest
           fi
