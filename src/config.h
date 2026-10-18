@@ -6,7 +6,7 @@ namespace Config {
     // CLAUDE.md-Workflow "Standard-Workflow: Push & Release") - erscheint
     // im Info-Screen (Menue > System > Info) und muss zum jeweiligen
     // Git-Tag passen.
-    constexpr const char* APP_VERSION = "6.9.3";
+    constexpr const char* APP_VERSION = "6.9.4";
 
     // Projekt-Repo-URL fuer den GitHub-QR-Code - zentral hier hinterlegt,
     // damit main.cpp (Ueber-Screen, grosser QR-Code) und menu_screen.cpp
@@ -315,6 +315,9 @@ namespace Config {
     // erst wenn auch dieser nicht durchkommt, ist die Verbindung
     // erkennbar laenger gestoert.
     constexpr uint32_t STALE_DATA_OFFLINE_THRESHOLD_MS = 30000;
+    // ageOutStale() uses this deadline too during failed fetches, so
+    // the cached radar markers and the table expire at the same time.
+    // postFetchUpdate() retains the shorter normal live timeout.
     // Danach wird ein einzelnes Flugzeug endgueltig aus der Radaranzeige
     // entfernt (Aircraft::lastSeenMs, derselbe "letzten bekannten Wert
     // merken"-Zeitstempel, den auch die Anflug-Erkennung/der intelligente
