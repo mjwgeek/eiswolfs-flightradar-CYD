@@ -12,11 +12,12 @@
 #ifdef HOSYOND_CYD40
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
-#if __has_include("hosyond_build_id.h")
+// Every OTA-enabled Hosyond image must carry its exact release commit.
+ // A missing stamp used to silently become "unversioned", causing an
+ // endless update notification even after a successful installation.
 #include "hosyond_build_id.h"
-#else
-#define HOSYOND_BUILD_SHA "unversioned"
-#endif
+static_assert(sizeof(HOSYOND_BUILD_SHA) == 41,
+              "Hosyond OTA build SHA must be a full 40-character Git commit");
 #endif
 
 namespace OtaUpdate {
