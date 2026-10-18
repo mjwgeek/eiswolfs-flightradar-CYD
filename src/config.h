@@ -6,14 +6,14 @@ namespace Config {
     // CLAUDE.md-Workflow "Standard-Workflow: Push & Release") - erscheint
     // im Info-Screen (Menue > System > Info) und muss zum jeweiligen
     // Git-Tag passen.
-    constexpr const char* APP_VERSION = "6.9.2";
+    constexpr const char* APP_VERSION = "6.9.3";
 
     // Projekt-Repo-URL fuer den GitHub-QR-Code - zentral hier hinterlegt,
     // damit main.cpp (Ueber-Screen, grosser QR-Code) und menu_screen.cpp
     // (kleiner QR-Code unten auf den OTA-Screens) garantiert denselben
     // Text kodieren, statt die URL an zwei Stellen im Code zu duplizieren
     // und dadurch auseinanderlaufen zu koennen.
-    constexpr const char* GITHUB_REPO_URL = "https://github.com/Eiswolf-BG/eiswolfs-flightradar-CYD";
+    constexpr const char* GITHUB_REPO_URL = "https://github.com/mjwgeek/eiswolfs-flightradar-CYD";
 
     // Display-Helligkeit (Menue > System > Helligkeit), in Prozent.
     // MIN bewusst nicht 0 - ein komplett dunkles Display koennte sonst wie
@@ -115,12 +115,10 @@ namespace Config {
     constexpr uint8_t RANGE_STEP_COUNT = 4;
     constexpr uint8_t DEFAULT_RANGE_INDEX = 1;
 
-    // adsb.lol statt adsb.fi (seit v4.0.2-Nachfolger) - adsb.fi lieferte an
-    // das Geraet trotz gueltigem HTTP 200 und validem JSON konstant leere
-    // Flugzeuglisten, vermutlich Cloudflare-Bot-Management/TLS-Fingerprinting
-    // gegen den ESP32-Client (per curl vom selben Netzwerk kamen jederzeit
-    // volle Daten). adsb.lol hat identisches URL-/JSON-Schema (nur "/v2/..."
-    // statt "/api/v3/...", Feldnamen unveraendert), daher direkt austauschbar.
+    // ADSB.fi v3 is the preferred aircraft-data provider (see adsb_client.cpp).
+    // Keep adsb.lol's compatible /v2 endpoint as fallback: an earlier ESP32
+    // firmware saw HTTP 200 with empty results from ADSB.fi on some networks.
+    // This fallback host does not override the ADSB.fi-first policy.
     constexpr const char* ADSB_API_HOST = "api.adsb.lol";
     constexpr uint16_t ADSB_API_PORT = 443;
     // TESTWEISE von 8000 auf 10000 erhoeht (siehe Absprache mit Karl) - nach
