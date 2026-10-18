@@ -262,7 +262,7 @@ Tapping the icon opens a small info popup explaining that the shown weather refl
 ---
 
 **Technical notes for the curious:**
-- Flight data is re-fetched from [adsb.lol](https://adsb.lol) every **8 seconds**.
+- Flight data is normally refreshed every **10 seconds** from [ADSB.fi](https://adsb.fi), with [ADSB.lol](https://adsb.lol) as a fallback when the preferred source is unavailable.
 - Altitude color coding is fixed: **green** < 10,000 ft, **yellow** 10,000–30,000 ft, **red** > 30,000 ft.
 - Radar radius is switchable between **10 / 25 / 50 / 100 km**.
 
@@ -289,7 +289,7 @@ If that doesn't help, the card itself may be incompatible or unreliable with thi
 If problems persist, also double-check the pinout table above, especially if you're using a different or unofficial CYD clone board.
 
 ## Data sources
-- Aircraft positions: [adsb.lol](https://adsb.lol) (free, no API key)
+- Aircraft positions: [ADSB.fi](https://adsb.fi) (primary, personal/noncommercial public API) and [ADSB.lol](https://adsb.lol) (fallback)
 - Aircraft model lookups: [hexdb.io](https://hexdb.io) (free, community-maintained, rate-limited)
 - Location: [ip-api.com](https://ip-api.com) (free IP geolocation)
 
