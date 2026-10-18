@@ -69,73 +69,85 @@ namespace {
         return c == ' ' || c == '\t' || c == '\n' || c == '\r';
     }
 
-    // Speicherschonendes Parsen grosser Antworten (siehe Root-Cause-
-    // Untersuchung/Design-Absprache im Chat): liest byte-weise vom Stream,
-    // bis die Zeichenfolge keyPattern (z.B. "\"ac\":") vollstaendig
-    // gelesen wurde, dann ueberspringt sie Leerzeichen bis zum
-    // oeffnenden '[' des Arrays. Reines Byte-Scannen ohne JSON-
-    // Verstaendnis - deshalb bewusst KEIN vollstaendiger Tokenizer.
-    // maxScan verhindert eine Endlosschleife, falls das Muster (z.B. bei
-    // einer unerwarteten Fehlerantwort) nie auftaucht.
-    bool skipToArrayStart(Stream& stream, const char* keyPattern, size_t maxScan) {
-        size_t patLen = strlen(keyPattern);
-        size_t matched = 0;
-        for (size_t i = 0; i < maxScan; i++) {
-            int c = stream.read();
+    // The ESP32 HTTPS stream is packetized: no currently available byte
+    // does not mean EOF. Wait for bounded intervals between TLS fragments.
+    int readByte(Stream& stream) {
+        char ch = 0;
+        return stream.readBytes(&ch, 1) == 1
+            ? static_cast<unsigned char>(ch) : -1;
+    }
+    int peekByte(Stream& stream) {
+        constexpr uint32_t GAP_TIMEOUT_MS = 1000;
+        const uint32_t start = millis();
+        for (;;) {
+            const int ch = stream.peek();
+            if (ch >= 0) return ch;
+            if ((uint32_t)(millis() - start) >= GAP_TIMEOUT_MS) return -1;
+            vTaskDelay(1);
+        }
+    }
+    // Stream the "ac" or "aircraft" JSON array without ever allocating
+    // a full response body; each aircraft is parsed separately below.
+    bool skipToAircraftArray(Stream& stream, size_t maxScan) {
+        for (size_t used = 0; used < maxScan;) {
+            int c = readByte(stream);
             if (c < 0) return false;
-            if ((char)c == keyPattern[matched]) {
-                matched++;
-                if (matched == patLen) {
-                    for (size_t j = 0; j < maxScan; j++) {
-                        int c2 = stream.read();
-                        if (c2 < 0) return false;
-                        if ((char)c2 == '[') return true;
-                        if (!isJsonSpace((char)c2)) return false;
-                    }
-                    return false;
+            ++used;
+            if (c != '"') continue;
+            char key[10] = {0};
+            size_t len = 0;
+            bool ended = false;
+            while (used < maxScan) {
+                int ch = readByte(stream);
+                if (ch < 0) return false;
+                ++used;
+                if (ch == '"') { ended = true; break; }
+                if (ch == '\\') {
+                    if (used >= maxScan || readByte(stream) < 0) return false;
+                    ++used;
+                    len = sizeof(key);
+                    continue;
                 }
-            } else {
-                // Kein vollstaendiges KMP noetig - das Muster ("ac":) hat
-                // keine problematische Selbstueberlappung, ein einfacher
-                // Neustart bei Fehltreffer reicht.
-                matched = ((char)c == keyPattern[0]) ? 1 : 0;
+                if (len < sizeof(key) - 1) key[len] = (char)ch;
+                ++len;
             }
+            if (!ended || (strcmp(key, "ac") && strcmp(key, "aircraft")))
+                continue;
+            int ch;
+            do {
+                if (used++ >= maxScan) return false;
+                ch = readByte(stream);
+                if (ch < 0) return false;
+            } while (isJsonSpace((char)ch));
+            if (ch != ':') continue;
+            do {
+                if (used++ >= maxScan) return false;
+                ch = readByte(stream);
+                if (ch < 0) return false;
+            } while (isJsonSpace((char)ch));
+            if (ch == '[') return true;
         }
         return false;
     }
-
-    // Liest das naechste Nicht-Leerzeichen-Byte vom Stream, OHNE es zu
-    // verbrauchen falls es kein Leerzeichen ist (peek) - fuer die
-    // Entscheidung "naechstes Flugzeug-Objekt oder Array-Ende", bevor
-    // deserializeJson() fuer das naechste Objekt aufgerufen wird.
     int peekNextNonSpace(Stream& stream, size_t maxScan) {
         for (size_t i = 0; i < maxScan; i++) {
-            int p = stream.peek();
+            int p = peekByte(stream);
             if (p < 0) return -1;
             if (!isJsonSpace((char)p)) return p;
-            stream.read();
+            readByte(stream);
         }
         return -1;
     }
-
-    // Liest UND verbraucht das naechste Nicht-Leerzeichen-Byte - fuer das
-    // Trennzeichen zwischen zwei Array-Elementen (',' oder ']').
     int readNextNonSpace(Stream& stream, size_t maxScan) {
         for (size_t i = 0; i < maxScan; i++) {
-            int c = stream.read();
+            int c = readByte(stream);
             if (c < 0) return -1;
             if (!isJsonSpace((char)c)) return c;
         }
         return -1;
     }
 
-    // "Naechste 40"-Auswahl (siehe Bugfix-Absprache im Chat): sobald die
-    // Tabelle voll ist, muss bei jedem Ersetzen bekannt sein, welcher der
-    // aktuell BELEGTEN Plaetze der am weitesten entfernte ist. Einfacher
-    // linearer Scan - bei nur tableCapacity (40) Eintraegen voellig
-    // unkritisch performant, bewusst nicht ueberoptimiert (siehe Absprache).
-    // Wird nur aufgerufen, wenn ALLE tableCapacity Plaetze bereits mit
-    // gueltigen Flugzeugen belegt sind.
+    // Preserve existing closest-40 aircraft selection and CPU-yield logic.
     void findFarthest(const Aircraft* table, uint8_t tableCapacity,
                        uint8_t& farthestIdx, float& farthestDist) {
         farthestIdx = 0;
@@ -159,8 +171,11 @@ void primeTime() {
     }
 }
 
-FetchResult fetch(double homeLat, double homeLon, float radiusKm,
-                   Aircraft* table, uint8_t tableCapacity) {
+// Reuse the existing low-memory radio display parser for both providers.
+static FetchResult fetchProvider(double homeLat, double homeLon, float radiusKm,
+                                Aircraft* table, uint8_t tableCapacity,
+                                const char* host, const char* apiPath,
+                                const char* providerName) {
     FetchResult result;
 
     if (WiFi.status() != WL_CONNECTED) {
@@ -178,9 +193,11 @@ FetchResult fetch(double homeLat, double homeLon, float radiusKm,
     persistentClient.stop();
     HTTPClient http;
     char url[160];
+    // Both API dist parameters are nautical miles; the UI stores km.
+    const float radiusNm = max(1.0f, min(250.0f, ceilf(radiusKm / 1.852f)));
     snprintf(url, sizeof(url),
-             "https://%s/v2/lat/%.5f/lon/%.5f/dist/%.0f",
-             Config::ADSB_API_HOST, homeLat, homeLon, radiusKm);
+             "https://%s%s/lat/%.5f/lon/%.5f/dist/%.0f",
+             host, apiPath, homeLat, homeLon, radiusNm);
 
     http.setTimeout(Config::ADSB_HTTP_TIMEOUT_MS);
     if (!http.begin(persistentClient, url)) {
@@ -215,6 +232,7 @@ FetchResult fetch(double homeLat, double homeLon, float radiusKm,
 
     int code = http.GET();
     result.httpCode = code;
+    Serial.printf("[ADSB] provider=%s HTTP=%d\n", providerName, code);
     if (code < 0) {
         // -11 is a read timeout. Other negative HTTPClient results may
         // indicate connect/TLS failure, lost socket, or resource exhaustion.
@@ -274,7 +292,8 @@ FetchResult fetch(double homeLat, double homeLon, float radiusKm,
     Stream& rawStream = http.getStream();
     WatchdogYieldingStream watchdogYieldStream(rawStream);
     Stream& stream = watchdogYieldStream;
-    if (!skipToArrayStart(stream, "\"ac\":", 512)) {
+    if (!skipToAircraftArray(stream, 1024)) {
+        Serial.printf("[ADSB] provider=%s missing aircraft array\n", providerName);
         http.end();
         result.ok = false;
         return result;
@@ -636,7 +655,80 @@ FetchResult fetch(double homeLat, double homeLon, float radiusKm,
     http.end();
     result.ok = true;
     result.aircraftCount = idx;
+    Serial.printf("[ADSB] provider=%s aircraft=%u\n", providerName,
+                  (unsigned)result.aircraftCount);
     return result;
+}
+
+// ADSB.fi is preferred, but previously returned empty HTTP 200 replies to
+// this model of ESP32. Keep ADSB.lol as a temporary, verified fallback.
+// Only one TLS connection exists at a time; http.end() runs before retry.
+FetchResult fetch(double homeLat, double homeLon, float radiusKm,
+                  Aircraft* table, uint8_t tableCapacity) {
+    constexpr uint32_t PRIMARY_RETRY_MS = 120000UL;
+    constexpr uint32_t EMPTY_RECHECK_MS = 120000UL;
+    static uint32_t primaryRetryAt = 0;
+    static uint32_t lastEmptyRecheck = 0;
+    static uint8_t consecutiveEmpty = 0;
+    if (WiFi.status() != WL_CONNECTED) return FetchResult{};
+
+    const uint32_t now = millis();
+    if (primaryRetryAt && (int32_t)(now - primaryRetryAt) < 0) {
+        FetchResult backup = fetchProvider(homeLat, homeLon, radiusKm,
+                                           table, tableCapacity,
+                                           Config::ADSB_API_HOST, "/v2",
+                                           "ADSB.lol fallback");
+        if (!backup.ok) primaryRetryAt = 0;
+        return backup;
+    }
+
+    FetchResult primary = fetchProvider(homeLat, homeLon, radiusKm,
+                                        table, tableCapacity,
+                                        "opendata.adsb.fi", "/api/v3",
+                                        "ADSB.fi primary");
+    if (primary.ok && primary.aircraftCount) {
+        primaryRetryAt = 0;
+        consecutiveEmpty = 0;
+        return primary;
+    }
+
+    if (primary.ok) {
+        if (consecutiveEmpty < 255) ++consecutiveEmpty;
+        if (consecutiveEmpty < 2 ||
+            (lastEmptyRecheck &&
+             (uint32_t)(millis() - lastEmptyRecheck) < EMPTY_RECHECK_MS)) {
+            return primary;
+        }
+        lastEmptyRecheck = millis() ? millis() : 1;
+        FetchResult backup = fetchProvider(homeLat, homeLon, radiusKm,
+                                           table, tableCapacity,
+                                           Config::ADSB_API_HOST, "/v2",
+                                           "ADSB.lol empty cross-check");
+        if (backup.ok && backup.aircraftCount) {
+            Serial.println("[ADSB] ADSB.fi unexpectedly empty; using backup");
+            primaryRetryAt = millis() + PRIMARY_RETRY_MS;
+            consecutiveEmpty = 0;
+            return backup;
+        }
+        return primary;  // A genuine empty sky is still a success.
+    }
+
+    consecutiveEmpty = 0;
+    Serial.printf("[ADSB] ADSB.fi failed (%d), trying ADSB.lol\n",
+                  primary.httpCode);
+    vTaskDelay(1);
+    FetchResult backup = fetchProvider(homeLat, homeLon, radiusKm,
+                                       table, tableCapacity,
+                                       Config::ADSB_API_HOST, "/v2",
+                                       "ADSB.lol fallback");
+    if (backup.ok) {
+        primaryRetryAt = millis() + PRIMARY_RETRY_MS;
+        return backup;
+    }
+    if (backup.httpCode == 429) return backup;
+    if (primary.httpCode == 429) return primary;
+    primaryRetryAt = millis() + 30000UL;
+    return backup;
 }
 
 }
