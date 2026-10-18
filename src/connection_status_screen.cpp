@@ -185,6 +185,14 @@ void run(TFT_eSPI& tft) {
 #endif
         y += LINE_H;
 
+        // Attribution for the public ADS-B feeds.
+        const int16_t footerEnd = (int16_t)(Config::SCREEN_HEIGHT - 50);
+        if (y + 35 < footerEnd) {
+            tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+            tft.drawString("Aircraft data: ADSB.fi / ADSB.lol", LINE_X, y + 4, 1);
+            tft.drawString("https://adsb.fi", LINE_X, y + 18, 1);
+        }
+
         Rect backBtn = {LINE_X, (int16_t)(Config::SCREEN_HEIGHT - 50), (int16_t)(Config::SCREEN_WIDTH - 20), 40};
         drawButton(tft, backBtn, I18n::t(StringId::BACK));
 
