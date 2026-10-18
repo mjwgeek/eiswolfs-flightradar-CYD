@@ -34,42 +34,45 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version=$(python -c 'import re; from pathlib import Path; s=Path("src/config.h").read_text(); m=re.search(r"APP_VERSION\\s*=\\s*\\\"(\\d+\\.\\d+\\.\\d+)\\\"", s); print(m.group(1) if m else "")')
+          version=$(python -c 'from pathlib import Path; print(next(line.split(chr(34))[1] for line in Path("src/config.h").read_text().splitlines() if "APP_VERSION =" in line and chr(34) in line))')
           test -n "$version"
           echo "VERSION=$version" >> "$GITHUB_ENV"
       - name: Build ESP32 firmware
         run: pio run -e esp32dev
-      - name: Validate OTA binary and version
+      - name: Validate binary and update web-flasher metadata
         shell: bash
         run: |
           set -euo pipefail
           test -s .pio/build/esp32dev/firmware.bin
           bytes=$(stat -c '%s' .pio/build/esp32dev/firmware.bin)
-          echo "Firmware bytes: $bytes"
+          echo "Firmware bytes: $bytes / 1966080 (OTA partition)"
           test "$bytes" -le 1966080
-          echo "Releasing firmware version $VERSION"
           cp .pio/build/esp32dev/firmware.bin firmware.bin
           python - <<'PY'
+          import os
+          import re
           from pathlib import Path
           p = Path("index.html")
           s = p.read_text(encoding="utf-8")
-          import os
-          import re
           version = os.environ["VERSION"]
-          old = s
-          s = re.sub(r'(id="versionLabel">)v[0-9]+\\.[0-9]+\\.[0-9]+',
-                     lambda m: m.group(1) + "v" + version, s, count=1)
-          s = re.sub(
-              r'(<option value="manifest\\.json" data-version=")v[0-9]+\\.[0-9]+\\.[0-9]+(" selected>)v[0-9]+\\.[0-9]+\\.[0-9]+( \\(latest\\)</option>)',
-              lambda m: m.group(1) + "v" + version + m.group(2) + "v" + version + m.group(3),
+          s, n1 = re.subn(r'(id="versionLabel">)v\d+\.\d+\.\d+',
+                          lambda m: m.group(1) + "v" + version, s, count=1)
+          s, n2 = re.subn(
+              r'(<option value="manifest\.json" data-version=")v\d+\.\d+\.\d+(" selected>)v\d+\.\d+\.\d+',
+              lambda m: m.group(1) + "v" + version + m.group(2) + "v" + version,
               s, count=1)
+          if n1 != 1 or n2 != 1:
+              raise SystemExit("Web flasher version markers not found")
           s = s.replace("https://github.com/Eiswolf-BG/eiswolfs-flightradar-CYD",
                         "https://github.com/mjwgeek/eiswolfs-flightradar-CYD")
-          if s == old:
-              raise SystemExit("No web installer version/source changes detected")
           p.write_text(s, encoding="utf-8")
           PY
-      - name: Update web-flasher binary on main
+      - name: Preserve compiled firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flightradar-esp32
+          path: firmware.bin
+      - name: Publish compiled binary for web flashing
         shell: bash
         run: |
           set -euo pipefail
@@ -77,23 +80,23 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add firmware.bin index.html
           if ! git diff --cached --quiet; then
-            git commit -m "build: publish FlightRadar v${VERSION} firmware.bin"
+            git commit -m "build: publish FlightRadar v$VERSION firmware.bin"
             git push origin HEAD:main
           fi
-      - name: Publish OTA GitHub release
+      - name: Publish OTA release on this fork
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view v${VERSION} --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload v${VERSION} firmware.bin --clobber --repo "$GITHUB_REPOSITORY"
-            gh release edit v${VERSION} --latest --repo "$GITHUB_REPOSITORY"
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" firmware.bin --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "v$VERSION" --latest --repo "$GITHUB_REPOSITORY"
           else
-            gh release create v${VERSION} firmware.bin \
+            gh release create "v$VERSION" firmware.bin \
               --repo "$GITHUB_REPOSITORY" \
               --target main \
-              --title ""FlightRadar v${VERSION} - ADSB.fi primary and fork OTA"" \
-              --notes "ADSB.fi v3 is the preferred aircraft feed; ADSB.lol is the fallback. Includes streaming/TLS error handling and kilometer-to-nautical-mile correction. Firmware OTA checks now target mjwgeek's releases." \
+              --title "FlightRadar v$VERSION - ADSB.fi primary and fork OTA" \
+              --notes "ADSB.fi v3 is the preferred feed, ADSB.lol the fallback. Contains streaming/TLS reliability fixes and correct distance units. The OTA checker points at this fork." \
               --latest
           fi
