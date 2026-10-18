@@ -1361,7 +1361,12 @@ void run(TFT_eSPI& tft, bool startAtFilters, bool startAtSystem) {
             // trotzdem immer noch zu einem frischen checkForUpdate()-Aufruf
             // in runOtaUpdateScreen(), diese Zeile ist nur eine Vorschau.
             String checkUpdateLine1 = OtaUpdate::isUpdateAvailable()
+#ifdef HOSYOND_CYD40
+                // Current vX.Y.Z at left; offered release SHA at right.
+                ? String("v") + Config::APP_VERSION + " -> " + OtaUpdate::availableVersion()
+#else
                 ? String(I18n::t(StringId::OTA_UPDATE_AVAILABLE_PREFIX)) + OtaUpdate::availableVersion()
+#endif
                 : String(I18n::t(StringId::CHECK_UPDATE_VERSION_PREFIX)) + Config::APP_VERSION;
             tft.setTextDatum(MC_DATUM);
             tft.setTextColor(UiTheme::accentColor(tft), TFT_BLACK);
@@ -2094,8 +2099,18 @@ void runPendingOtaInstall(TFT_eSPI& tft) {
     while (true) {
         WifiMgr::State s = WifiMgr::getState();
         if (s == WifiMgr::State::Connected) break;
-        if (s == WifiMgr::State::Failed || s == WifiMgr::State::NoCredentials) return;
-        if (millis() - waitStartMs > WIFI_WAIT_SAFETY_TIMEOUT_MS) return;
+        if (s == WifiMgr::State::Failed || s == WifiMgr::State::NoCredentials) {
+            Serial.println("[OTA-CYD40] Installation aborted: Wi-Fi connection failed.");
+            infoScreen(tft, I18n::t(StringId::OTA_UPDATE_FAILED),
+                       I18n::t(StringId::OTA_FAILED_BODY), TFT_RED, I18n::t(StringId::OK));
+            return;
+        }
+        if (millis() - waitStartMs > WIFI_WAIT_SAFETY_TIMEOUT_MS) {
+            Serial.println("[OTA-CYD40] Installation aborted: Wi-Fi timed out.");
+            infoScreen(tft, I18n::t(StringId::OTA_UPDATE_FAILED),
+                       I18n::t(StringId::OTA_FAILED_BODY), TFT_RED, I18n::t(StringId::OK));
+            return;
+        }
         WifiMgr::update();
         delay(50);
     }
@@ -2125,10 +2140,15 @@ void runPendingOtaInstall(TFT_eSPI& tft) {
         SettingsStore::setOtaJustInstalled(true);
         ESP.restart();
     }
-    // Fehlschlag: bewusst KEIN eigener Fehler-Screen hier (anders als im
-    // interaktiven runOtaUpdateScreen()-Pfad) - main.cpp::setup() faehrt
-    // direkt im Anschluss ganz normal weiter hoch, der Nutzer kann es
-    // spaeter jederzeit erneut ueber das Menue versuchen.
+    // The restart-before-download path must NOT silently boot the old
+    // firmware after a failed download, flash, or boot-slot verification.
+    Serial.printf("[OTA-CYD40] Installation FAILED; still running v%s\n",
+                  Config::APP_VERSION);
+    String failureBody = String(I18n::t(StringId::OTA_FAILED_BODY)) +
+                         "\n\nFirmware v" + Config::APP_VERSION +
+                         " remains installed.";
+    infoScreen(tft, I18n::t(StringId::OTA_UPDATE_FAILED),
+               failureBody, TFT_RED, I18n::t(StringId::OK));
 }
 
 }

@@ -376,11 +376,32 @@ bool performUpdate(const char* url, void (*onProgress)(uint8_t percent)) {
         Serial.printf("[OTA] Fehlgeschlagen: result=%d error=%d (%s) freeHeap=%u maxAlloc=%u\n", (int)result,
                       httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str(),
                       (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
-    } else {
-        Serial.println("[OTA] Erfolgreich heruntergeladen und geflasht.");
+        return false;
     }
 
-    return result == HTTP_UPDATE_OK;
+#ifdef HOSYOND_CYD40
+    // A successful flash doesn't guarantee the bootloader will select it.
+    // Verify ESP-IDF's chosen boot slot before reporting OTA success.
+    const esp_partition_t* selected = esp_ota_get_boot_partition();
+    Serial.printf("[OTA-CYD40] After flash: running=%s selected=%s expected=%s\n",
+                  running ? running->label : "none",
+                  selected ? selected->label : "none",
+                  next ? next->label : "none");
+    if (!selected || selected->address != next->address) {
+        // Validate and select the newly flashed image as a safe recovery.
+        esp_err_t bootErr = esp_ota_set_boot_partition(next);
+        Serial.printf("[OTA-CYD40] Re-select OTA boot partition: %s\n",
+                      esp_err_to_name(bootErr));
+        selected = esp_ota_get_boot_partition();
+        if (bootErr != ESP_OK || !selected || selected->address != next->address) {
+            Serial.println("[OTA-CYD40] ERROR: flashed image not selected for next boot.");
+            return false;
+        }
+    }
+    Serial.println("[OTA-CYD40] Verified next boot slot selects newly flashed firmware.");
+#endif
+    Serial.println("[OTA] Erfolgreich heruntergeladen und geflasht.");
+    return true;
 }
 
 }
