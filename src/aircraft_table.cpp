@@ -105,7 +105,10 @@ void ageOutStale(uint32_t nowMs) {
     bool anyEvicted = false;
     for (auto& a : table) {
         if (!a.valid) continue;
-        if (nowMs - a.lastSeenMs > STALE_TIMEOUT_MS) {
+        // Keep the last known position until the radar's 75-second
+        // display grace period. postFetchUpdate() retains STALE_TIMEOUT_MS
+        // for live tracking whenever a fetch succeeds.
+        if (nowMs - a.lastSeenMs > Config::STALE_DATA_REMOVAL_MS) {
             a = Aircraft{};
             anyEvicted = true;
         }
