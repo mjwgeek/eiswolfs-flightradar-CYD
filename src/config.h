@@ -6,7 +6,7 @@ namespace Config {
     // CLAUDE.md-Workflow "Standard-Workflow: Push & Release") - erscheint
     // im Info-Screen (Menue > System > Info) und muss zum jeweiligen
     // Git-Tag passen.
-    constexpr const char* APP_VERSION = "6.9.2";
+    constexpr const char* APP_VERSION = "6.9.3";
 
     // Projekt-Repo-URL fuer den GitHub-QR-Code - zentral hier hinterlegt,
     // damit main.cpp (Ueber-Screen, grosser QR-Code) und menu_screen.cpp
@@ -119,12 +119,9 @@ namespace Config {
     constexpr uint8_t RANGE_STEP_COUNT = 4;
     constexpr uint8_t DEFAULT_RANGE_INDEX = 1;
 
-    // adsb.lol statt adsb.fi (seit v4.0.2-Nachfolger) - adsb.fi lieferte an
-    // das Geraet trotz gueltigem HTTP 200 und validem JSON konstant leere
-    // Flugzeuglisten, vermutlich Cloudflare-Bot-Management/TLS-Fingerprinting
-    // gegen den ESP32-Client (per curl vom selben Netzwerk kamen jederzeit
-    // volle Daten). adsb.lol hat identisches URL-/JSON-Schema (nur "/v2/..."
-    // statt "/api/v3/...", Feldnamen unveraendert), daher direkt austauschbar.
+    // ADSB.fi v3 is preferred; this ADSB.lol host remains a fallback for
+    // the ESP32's historically empty HTTP 200 responses from ADSB.fi.
+    // The provider preference is implemented in adsb_client.cpp.
     constexpr const char* ADSB_API_HOST = "api.adsb.lol";
     constexpr uint16_t ADSB_API_PORT = 443;
     // TESTWEISE von 8000 auf 10000 erhoeht (siehe Absprache mit Karl) - nach
