@@ -5066,7 +5066,9 @@ void tick(TFT_eSPI& tft, int16_t top, uint32_t deltaMs) {
         hp.staleLabelCache[sizeof(hp.staleLabelCache) - 1] = 0;
 
         bool inAlertRange = hp.distanceKm <= Config::LED_ALERT_RADIUS_KM;
-        if (inAlertRange && !ledBlinkOn) {
+        // Cached positions must stay visible even if the live proximity
+        // LED is off while the feed is offline.
+        if (inAlertRange && !ledBlinkOn && !stale) {
             if (hp.isGroundVehicle) {
                 drawGroundVehicleMarker(tft, hp.x, hp.y, TFT_BLACK);
             } else if (hp.isRotorcraft) {
@@ -5102,11 +5104,11 @@ void tick(TFT_eSPI& tft, int16_t top, uint32_t deltaMs) {
         drawVertTrendArrow(tft, hp.x, hp.y, hp.vertTrend, effectiveColor);
 
         if (hp.isEmergency) {
-            tft.drawCircle(hp.x, hp.y, 12, TFT_RED);
+            tft.drawCircle(hp.x, hp.y, 12, stale ? effectiveColor : TFT_RED);
         } else if (hp.isWatched) {
-            tft.drawCircle(hp.x, hp.y, 12, TFT_CYAN);
+            tft.drawCircle(hp.x, hp.y, 12, stale ? effectiveColor : TFT_CYAN);
         } else if (hp.isNotable) {
-            tft.drawCircle(hp.x, hp.y, 12, TFT_ORANGE);
+            tft.drawCircle(hp.x, hp.y, 12, stale ? effectiveColor : TFT_ORANGE);
         }
 
         // Circle-Crossing-Puls (siehe Aircraft::ringCrossedAtMs) - rein
@@ -5177,7 +5179,9 @@ void tick(TFT_eSPI& tft, int16_t top, uint32_t deltaMs) {
     bool offlineNow = AircraftTable::msSinceLastSuccessfulFetch(millis()) > Config::STALE_DATA_OFFLINE_THRESHOLD_MS;
     if (offlineNow) {
         kind = InfoMsgKind::Offline;
-        infoText = I18n::t(StringId::RADAR_OFFLINE_STALE_HINT);
+        infoText = I18n::t(visibleCountNow > 0
+            ? StringId::RADAR_OFFLINE_STALE_HINT
+            : StringId::RADAR_OFFLINE_NO_CACHE_HINT);
     } else if (visibleCountNow == 0) {
         kind = InfoMsgKind::EmptySky;
         uint32_t emptySec = (millis() - lastAircraftSeenMs) / 1000;
@@ -5537,10 +5541,15 @@ void updateProximityAlert(uint32_t nowMs) {
     // gebunden), da ein Watchlist-Treffer seit Entfernung des frueheren
     // watchlistAlertEnabled()-Schalters immer geprueft werden muss.
     {
+        // Cached positions are display-only, never live alert targets.
+        const bool feedOffline =
+            AircraftTable::msSinceLastSuccessfulFetch(nowMs) >
+                Config::STALE_DATA_OFFLINE_THRESHOLD_MS;
         AircraftTable::lock();
         Aircraft* table = AircraftTable::raw();
         for (uint8_t i = 0; i < AircraftTable::capacity(); i++) {
-            if (!table[i].valid) continue;
+            if (!table[i].valid || feedOffline ||
+                nowMs - table[i].lastSeenMs > Config::FETCH_INTERVAL_MS * 3UL) continue;
 
             // Notfall-Squawk und Watchlist-Treffer bewusst OHNE
             // Sichtbarkeits-Einschraenkung (siehe Kommentar bei
@@ -5786,11 +5795,16 @@ void updateProximityAlert(uint32_t nowMs) {
 EmergencyInfo checkEmergency() {
     EmergencyInfo info;
     if (!SettingsStore::emergencyAlertEnabled()) return info;
+    const uint32_t nowMs = millis();
+    if (AircraftTable::msSinceLastSuccessfulFetch(nowMs) >
+        Config::STALE_DATA_OFFLINE_THRESHOLD_MS) return info;
 
     AircraftTable::lock();
     Aircraft* table = AircraftTable::raw();
     for (uint8_t i = 0; i < AircraftTable::capacity(); i++) {
-        if (table[i].valid && isEmergencySquawk(table[i].squawk)) {
+        if (table[i].valid &&
+            nowMs - table[i].lastSeenMs <= Config::FETCH_INTERVAL_MS * 3UL &&
+            isEmergencySquawk(table[i].squawk)) {
             info.active = true;
             strncpy(info.callsign, table[i].callsign[0] ? table[i].callsign : table[i].hex,
                     sizeof(info.callsign) - 1);
