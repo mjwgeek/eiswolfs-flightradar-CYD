@@ -11,8 +11,11 @@ namespace AircraftTable {
     uint8_t validCount();
     void postFetchUpdate(double homeLat, double homeLon);
 
-    // Entfernt veraltete Eintraege (Aircraft::lastSeenMs laenger als der
-    // interne STALE_TIMEOUT_MS-Schwellenwert her) UNABHAENGIG vom Erfolg
+    // Entfernt alte Eintraege nach Config::STALE_DATA_REMOVAL_MS auch bei
+    // einer unterbrochenen Datenverbindung. So kann das Radar die letzten
+    // Positionen 75 Sekunden lang ausgrauen, ohne laufende Live-Meldungen
+    // zu veraendern. postFetchUpdate() behaelt bei erfolgreichen Abrufen
+    // die kuerzere STALE_TIMEOUT_MS-Regel bei. UNABHAENGIG vom Erfolg
     // eines ADS-B-Abrufs - anders als postFetchUpdate() (das dieselbe
     // Alterung nebenbei mit erledigt, aber nur nach einem ERFOLGREICHEN
     // Abruf ueberhaupt aufgerufen wird). Bricht die Verbindung zum ADS-B-

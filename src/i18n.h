@@ -1492,6 +1492,10 @@ enum class StringId : uint16_t {
     // Strings.
     SCREENSAVER_RECALL_PREFIX,
 
+    // Appended to preserve existing language string IDs: no retained
+    // aircraft remain after the offline cache has expired.
+    RADAR_OFFLINE_NO_CACHE_HINT,
+
     COUNT
 };
 

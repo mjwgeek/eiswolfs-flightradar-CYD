@@ -659,6 +659,7 @@ static const char* const I18N_EN[] = {
     "Most returns today: ",
 
     "Last: ",
+    "No connection - no cached aircraft",
 };
 
 static_assert(sizeof(I18N_EN) / sizeof(I18N_EN[0]) == (size_t)StringId::COUNT,
