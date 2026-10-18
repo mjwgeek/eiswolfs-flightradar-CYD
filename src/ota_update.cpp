@@ -14,12 +14,12 @@ namespace OtaUpdate {
 
 namespace {
     constexpr const char* RELEASES_API_URL =
-        "https://api.github.com/repos/Eiswolf-BG/eiswolfs-flightradar-CYD/releases/latest";
+        "https://api.github.com/repos/mjwgeek/eiswolfs-flightradar-CYD/releases/latest";
     // GitHub verlangt bei API-Anfragen einen aussagekraeftigen User-Agent
     // (sonst HTTP 403) - gleiches Prinzip wie Config::NOMINATIM_USER_AGENT
     // fuer die Adresssuche.
     constexpr const char* USER_AGENT =
-        "EiswolfsFlightradarCYD-OTA/1.0 (+https://github.com/Eiswolf-BG/eiswolfs-flightradar-CYD)";
+        "EiswolfsFlightradarCYD-OTA/1.0 (+https://github.com/mjwgeek/eiswolfs-flightradar-CYD)";
 
     bool parseVersion(const char* s, int& major, int& minor, int& patch) {
         major = minor = patch = 0;
