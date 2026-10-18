@@ -159,6 +159,15 @@ void run(TFT_eSPI& tft) {
         tft.println(String(I18n::t(StringId::CONNECTION_STATUS_QUALITY_PREFIX)) + labelForQuality(quality));
         y += LINE_H;
 
+        // Credit the public ADS-B data provider on the connection screen.
+        // Keep the credit short enough for the 240-pixel CYD display.
+        const int16_t footerEnd = (int16_t)(Config::SCREEN_HEIGHT - 50);
+        if (y + 35 < footerEnd) {
+            tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+            tft.drawString("Aircraft data: ADSB.fi / ADSB.lol", LINE_X, y + 4, 1);
+            tft.drawString("https://adsb.fi", LINE_X, y + 18, 1);
+        }
+
         Rect backBtn = {LINE_X, (int16_t)(Config::SCREEN_HEIGHT - 50), (int16_t)(Config::SCREEN_WIDTH - 20), 40};
         drawButton(tft, backBtn, I18n::t(StringId::BACK));
 
